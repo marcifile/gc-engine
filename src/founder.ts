@@ -52,6 +52,20 @@ export async function decideNextWork(company: unknown): Promise<FounderDecision>
   }
 
   const data: any = await response.json();
-  const raw = data?.choices?.[0]?.message?.content || "{}";
-  return JSON.parse(raw) as FounderDecision;
+  const raw = String(data?.choices?.[0]?.message?.content || "{}").trim();
+  const cleaned = raw
+    .replace(/^\`\`\`(?:json)?\s*/i, "")
+    .replace(/\s*\`\`\`$/, "")
+    .trim();
+
+  try {
+    return JSON.parse(cleaned) as FounderDecision;
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(cleaned.slice(start, end + 1)) as FounderDecision;
+    }
+    throw new Error(`Founder returned invalid JSON: ${cleaned.slice(0, 500)}`);
+  }
 }
