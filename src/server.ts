@@ -14,6 +14,7 @@ import { refreshBrowserRun, startBrowserPoller } from "./browserPoller.js";
 import { uploadTokenMetadata } from "./pinata.js";
 import { startFounderScheduler } from "./founderScheduler.js";
 import { buildGoogleAuthUrl, createCalendarEvent, exchangeGoogleCode, googleConfigured, saveGoogleIntegration, sendGmail, uploadFileToDrive } from "./google.js";
+import { queueOrExecuteExternalAction } from "./externalExecutor.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -236,7 +237,7 @@ app.post("/concerns/:id/run", async (req, res) => {
   } else {
     const concernResult = await pool.query("SELECT * FROM concerns WHERE id = $1", [concernId]);
     if (concernResult.rowCount) {
-      const [notesResult, memoriesResult, tasksResult] = await Promise.all([
+      const [notesResult, memoriesResult, tasksResult, filesResult, integrationsResult] = await Promise.all([
         pool.query(
           "SELECT * FROM notes WHERE concern_id = $1 ORDER BY created_at DESC LIMIT 25",
           [concernId]
@@ -248,12 +249,27 @@ app.post("/concerns/:id/run", async (req, res) => {
         pool.query(
           "SELECT title, status, desk, result_summary, created_at, completed_at FROM tasks WHERE concern_id = $1 ORDER BY created_at DESC LIMIT 20",
           [concernId]
+        ),
+        pool.query(
+          "SELECT id, path, mime_type, created_by, created_at FROM files WHERE concern_id = $1 ORDER BY created_at DESC LIMIT 30",
+          [concernId]
+        ),
+        pool.query(
+          "SELECT provider, scopes, updated_at FROM integrations WHERE concern_id = $1",
+          [concernId]
         )
       ]);
       company = {
         ...toConcern(concernResult.rows[0], notesResult.rows),
+        currentTime: new Date().toISOString(),
         memories: memoriesResult.rows,
-        recentTasks: tasksResult.rows
+        recentTasks: tasksResult.rows,
+        recentFiles: filesResult.rows,
+        connectedIntegrations: integrationsResult.rows.map((row) => ({
+          provider: row.provider,
+          scopes: row.scopes,
+          updatedAt: row.updated_at
+        }))
       };
     }
   }
@@ -425,7 +441,17 @@ app.post("/concerns/:id/run", async (req, res) => {
       );
     }
 
-    res.json({ run: decision, browserWork, artifact });
+    let externalAction: any = null;
+    if (pool && decision.externalAction) {
+      externalAction = await queueOrExecuteExternalAction(
+        pool,
+        concernId,
+        company.externalActionsMode === "ask" ? "ask" : "automatic",
+        decision.externalAction
+      );
+    }
+
+    res.json({ run: decision, browserWork, artifact, externalAction });
   } catch (error: any) {
     console.error(error);
     res.status(502).json({ error: "founder_run_failed", detail: String(error?.message || error).slice(0, 1000) });
