@@ -5,6 +5,8 @@ import { z } from "zod";
 import { initDb, pool, toConcern } from "./db.js";
 import { startBrowserWork, getBrowserWork } from "./browser.js";
 import { decideNextWork } from "./founder.js";
+import { getTokenMarket } from "./market.js";
+import { getAsset } from "./solana.js";
 
 const app = express();
 app.use(cors());
@@ -338,6 +340,62 @@ app.get("/concerns/:id/browser-runs", async (req, res) => {
     [req.params.id]
   );
   res.json({ runs: result.rows });
+});
+
+app.patch("/concerns/:id/token", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+
+  const parsed = z.object({ mintAddress: z.string().min(32).max(64) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_mint" });
+
+  const updated = await pool.query(
+    "UPDATE concerns SET mint_address = $1, updated_at = NOW() WHERE id = $2 RETURNING *",
+    [parsed.data.mintAddress, req.params.id]
+  );
+
+  if (!updated.rowCount) return res.status(404).json({ error: "concern_not_found" });
+
+  res.json({ concern: toConcern(updated.rows[0]) });
+});
+
+app.get("/concerns/:id/market", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+
+  const result = await pool.query("SELECT mint_address FROM concerns WHERE id = $1", [req.params.id]);
+  if (!result.rowCount) return res.status(404).json({ error: "concern_not_found" });
+
+  const mint = result.rows[0].mint_address;
+  if (!mint) return res.json({ market: null });
+
+  try {
+    const market = await getTokenMarket(mint);
+    if (market.marketCap !== null) {
+      await pool.query(
+        "UPDATE concerns SET market_cap_usd = $1, updated_at = NOW() WHERE id = $2",
+        [market.marketCap, req.params.id]
+      );
+    }
+    res.json({ market });
+  } catch (error: any) {
+    res.status(502).json({ error: "market_data_failed", detail: String(error?.message || error) });
+  }
+});
+
+app.get("/concerns/:id/token-metadata", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+
+  const result = await pool.query("SELECT mint_address FROM concerns WHERE id = $1", [req.params.id]);
+  if (!result.rowCount) return res.status(404).json({ error: "concern_not_found" });
+
+  const mint = result.rows[0].mint_address;
+  if (!mint) return res.json({ asset: null });
+
+  try {
+    const asset = await getAsset(mint);
+    res.json({ asset });
+  } catch (error: any) {
+    res.status(502).json({ error: "solana_data_failed", detail: String(error?.message || error) });
+  }
 });
 
 app.get("/concerns/:id/events", async (req, res) => {
