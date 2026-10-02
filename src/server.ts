@@ -17,7 +17,6 @@ import { uploadTokenMetadata } from "./pinata.js";
 import { startFounderScheduler } from "./founderScheduler.js";
 import { buildGoogleAuthUrl, createCalendarEvent, exchangeGoogleCode, googleConfigured, saveGoogleIntegration, sendGmail, uploadFileToDrive } from "./google.js";
 import { executeExternalActionById, queueOrExecuteExternalAction } from "./externalExecutor.js";
-import { prepareFeeSharingTransaction } from "./feeSharing.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -717,6 +716,7 @@ app.post("/concerns/:id/rewards/prepare-routing", async (req, res) => {
 
   try {
     const operatingWallet = concern.operating_wallet || await ensureOperatingWallet(pool, req.params.id);
+    const { prepareFeeSharingTransaction } = await import("./feeSharing.js");
     const prepared = await prepareFeeSharingTransaction({
       creator: parsed.data.creator,
       mint: concern.mint_address,
