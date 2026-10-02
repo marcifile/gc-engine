@@ -17,10 +17,9 @@ export type FounderDecision = {
 function companyModel(company: unknown) {
   const value = company && typeof company === "object" ? String((company as any).founderModel || "") : "";
   const allowed = new Set([
-    "anthropic/claude-sonnet-4",
-    "openai/gpt-5.6",
-    "google/gemini-2.5-pro",
-    "x-ai/grok-4"
+    "anthropic/claude-sonnet-5.5",
+    "openai/gpt-6.1-sol",
+    "google/gemini-3.5-flash"
   ]);
   return allowed.has(value) ? value : (process.env.FOUNDER_MODEL || "anthropic/claude-sonnet-4");
 }
