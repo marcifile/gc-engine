@@ -14,6 +14,17 @@ export type FounderDecision = {
   costUsd?: number;
 };
 
+function companyModel(company: unknown) {
+  const value = company && typeof company === "object" ? String((company as any).founderModel || "") : "";
+  const allowed = new Set([
+    "anthropic/claude-sonnet-4",
+    "openai/gpt-5.6",
+    "google/gemini-2.5-pro",
+    "x-ai/grok-4"
+  ]);
+  return allowed.has(value) ? value : (process.env.FOUNDER_MODEL || "anthropic/claude-sonnet-4");
+}
+
 export async function decideNextWork(company: unknown): Promise<FounderDecision> {
   if (!process.env.OPENROUTER_API_KEY) {
     throw new Error("OPENROUTER_API_KEY is not configured");
@@ -28,7 +39,7 @@ export async function decideNextWork(company: unknown): Promise<FounderDecision>
       "X-Title": "GC"
     },
     body: JSON.stringify({
-      model: process.env.FOUNDER_MODEL || "anthropic/claude-sonnet-4",
+      model: companyModel(company),
       temperature: 0.3,
       messages: [
         {
@@ -113,7 +124,7 @@ export async function produceWorkArtifact(
       "X-Title": "GC"
     },
     body: JSON.stringify({
-      model: process.env.WORKER_MODEL || process.env.FOUNDER_MODEL || "anthropic/claude-sonnet-4",
+      model: process.env.WORKER_MODEL || companyModel(company),
       temperature: 0.25,
       messages: [
         {
