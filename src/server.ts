@@ -8,7 +8,7 @@ import { initDb, pool, toConcern } from "./db.js";
 import { startBrowserWork, getBrowserWork } from "./browser.js";
 import { decideNextWork, produceWorkArtifact } from "./founder.js";
 import { getTokenMarket } from "./market.js";
-import { getAsset } from "./solana.js";
+import { getAsset, getSignatureStatus } from "./solana.js";
 import { preparePumpCreate } from "./pump.js";
 import { refreshBrowserRun, startBrowserPoller } from "./browserPoller.js";
 import { uploadTokenMetadata } from "./pinata.js";
@@ -518,24 +518,66 @@ app.post("/concerns/:id/launch/confirm", async (req, res) => {
   const parsed = confirmLaunchSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "invalid_confirmation" });
 
-  const updated = await pool.query(
-    "UPDATE concerns SET mint_address = $1, status = 'working', updated_at = NOW() WHERE id = $2 RETURNING *",
-    [parsed.data.mintAddress, req.params.id]
-  );
-  if (!updated.rowCount) return res.status(404).json({ error: "concern_not_found" });
+  const concern = await pool.query("SELECT * FROM concerns WHERE id = $1", [req.params.id]);
+  if (!concern.rowCount) return res.status(404).json({ error: "concern_not_found" });
 
-  await pool.query(
-    `INSERT INTO events (id, concern_id, type, summary, metadata)
-     VALUES ($1, $2, 'token_launched', $3, $4::jsonb)`,
-    [
-      randomUUID(),
-      req.params.id,
-      `${updated.rows[0].ticker} launched on pump`,
-      JSON.stringify({ mintAddress: parsed.data.mintAddress, signature: parsed.data.signature })
-    ]
-  );
+  try {
+    let chainStatus = await getSignatureStatus(parsed.data.signature);
 
-  res.json({ concern: toConcern(updated.rows[0]), signature: parsed.data.signature });
+    for (let i = 0; i < 8 && !chainStatus.confirmationStatus && !chainStatus.err; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      chainStatus = await getSignatureStatus(parsed.data.signature);
+    }
+
+    if (chainStatus.err) {
+      return res.status(409).json({ error: "launch_transaction_failed", chainError: chainStatus.err });
+    }
+
+    if (!chainStatus.confirmationStatus) {
+      return res.status(202).json({
+        pending: true,
+        signature: parsed.data.signature,
+        mintAddress: parsed.data.mintAddress
+      });
+    }
+
+    const updated = await pool.query(
+      "UPDATE concerns SET mint_address = $1, status = 'working', updated_at = NOW() WHERE id = $2 RETURNING *",
+      [parsed.data.mintAddress, req.params.id]
+    );
+
+    await pool.query(
+      `INSERT INTO events (id, concern_id, type, summary, metadata)
+       SELECT $1, $2, 'token_launched', $3, $4::jsonb
+       WHERE NOT EXISTS (
+         SELECT 1 FROM events
+         WHERE concern_id = $2
+           AND type = 'token_launched'
+           AND metadata->>'signature' = $5
+       )`,
+      [
+        randomUUID(),
+        req.params.id,
+        `${updated.rows[0].ticker} launched on pump`,
+        JSON.stringify({
+          mintAddress: parsed.data.mintAddress,
+          signature: parsed.data.signature,
+          confirmationStatus: chainStatus.confirmationStatus
+        }),
+        parsed.data.signature
+      ]
+    );
+
+    res.json({
+      pending: false,
+      concern: toConcern(updated.rows[0]),
+      signature: parsed.data.signature,
+      confirmationStatus: chainStatus.confirmationStatus
+    });
+  } catch (error: any) {
+    console.error(error);
+    res.status(502).json({ error: "launch_confirmation_failed", detail: String(error?.message || error).slice(0, 1000) });
+  }
 });
 
 app.patch("/concerns/:id/token", async (req, res) => {
