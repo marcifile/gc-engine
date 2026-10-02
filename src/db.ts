@@ -118,7 +118,7 @@ export async function initDb() {
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS creator_rewards_configured BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS creator_wallet TEXT;
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS operating_wallet TEXT;
-    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS founder_model TEXT NOT NULL DEFAULT 'anthropic/claude-sonnet-4';
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS founder_model TEXT NOT NULL DEFAULT 'anthropic/claude-sonnet-5.5';
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS allowed_tools TEXT[] NOT NULL DEFAULT ARRAY['browser','google_drive','gmail','calendar','solana','market_data','ipfs']::TEXT[];
 
 
@@ -167,7 +167,7 @@ export async function initDb() {
   `);
 
   await pool.query(`
-    INSERT INTO concerns (id, name, ticker, category, summary, status, current_task)
+    INSERT INTO concerns (id, name, ticker, category, summary, status, current_task, founder_model)
     VALUES (
       'mesa',
       'MESA',
@@ -175,9 +175,10 @@ export async function initDb() {
       'restaurant software',
       'finding a better inventory workflow for small restaurants',
       'working',
-      'research inventory problems for independent restaurants'
+      'research inventory problems for independent restaurants',
+      'anthropic/claude-sonnet-5.5'
     )
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE SET founder_model = 'anthropic/claude-sonnet-5.5';
   `);
 }
 
