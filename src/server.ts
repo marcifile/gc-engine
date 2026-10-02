@@ -17,6 +17,7 @@ import { uploadTokenMetadata } from "./pinata.js";
 import { startFounderScheduler } from "./founderScheduler.js";
 import { buildGoogleAuthUrl, createCalendarEvent, exchangeGoogleCode, googleConfigured, saveGoogleIntegration, sendGmail, uploadFileToDrive } from "./google.js";
 import { executeExternalActionById, queueOrExecuteExternalAction } from "./externalExecutor.js";
+import { prepareFeeSharingTransaction } from "./feeSharing.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -700,6 +701,98 @@ app.post("/concerns/:id/launch/confirm", async (req, res) => {
   }
 });
 
+const feeSharingPrepareSchema = z.object({
+  creator: z.string().min(32).max(64)
+});
+
+app.post("/concerns/:id/rewards/prepare-routing", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const parsed = feeSharingPrepareSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_creator_wallet" });
+
+  const concernResult = await pool.query("SELECT * FROM concerns WHERE id = $1", [req.params.id]);
+  if (!concernResult.rowCount) return res.status(404).json({ error: "concern_not_found" });
+  const concern = concernResult.rows[0];
+  if (!concern.mint_address) return res.status(409).json({ error: "token_not_launched" });
+
+  try {
+    const operatingWallet = concern.operating_wallet || await ensureOperatingWallet(pool, req.params.id);
+    const prepared = await prepareFeeSharingTransaction({
+      creator: parsed.data.creator,
+      mint: concern.mint_address,
+      operatingWallet
+    });
+
+    await pool.query(
+      `UPDATE concerns SET creator_wallet = $1, operating_wallet = $2, updated_at = NOW() WHERE id = $3`,
+      [parsed.data.creator, operatingWallet, req.params.id]
+    );
+
+    res.json({
+      ...prepared,
+      mintAddress: concern.mint_address
+    });
+  } catch (error: any) {
+    console.error(error);
+    res.status(502).json({
+      error: "reward_routing_prepare_failed",
+      detail: String(error?.message || error).slice(0, 1200)
+    });
+  }
+});
+
+const rewardRoutingConfirmSchema = z.object({
+  signature: z.string().min(32).max(128)
+});
+
+app.post("/concerns/:id/rewards/confirm-routing", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const parsed = rewardRoutingConfirmSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_signature" });
+
+  try {
+    let chainStatus = await getSignatureStatus(parsed.data.signature);
+    for (let i = 0; i < 8 && !chainStatus.confirmationStatus && !chainStatus.err; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      chainStatus = await getSignatureStatus(parsed.data.signature);
+    }
+
+    if (chainStatus.err) {
+      return res.status(409).json({ error: "reward_routing_transaction_failed", chainError: chainStatus.err });
+    }
+    if (!chainStatus.confirmationStatus) {
+      return res.status(202).json({ pending: true, signature: parsed.data.signature });
+    }
+
+    const updated = await pool.query(
+      `UPDATE concerns
+       SET creator_rewards_configured = TRUE,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [req.params.id]
+    );
+    if (!updated.rowCount) return res.status(404).json({ error: "concern_not_found" });
+
+    await pool.query(
+      `INSERT INTO events (id, concern_id, type, summary, metadata)
+       VALUES ($1, $2, 'creator_rewards_routed', 'creator rewards routed to company operating wallet', $3::jsonb)`,
+      [randomUUID(), req.params.id, JSON.stringify({ signature: parsed.data.signature })]
+    );
+
+    res.json({
+      pending: false,
+      signature: parsed.data.signature,
+      concern: toConcern(updated.rows[0])
+    });
+  } catch (error: any) {
+    res.status(502).json({
+      error: "reward_routing_confirmation_failed",
+      detail: String(error?.message || error).slice(0, 1000)
+    });
+  }
+});
+
 app.patch("/concerns/:id/token", async (req, res) => {
   if (!pool) return res.status(503).json({ error: "database_required" });
 
@@ -1105,6 +1198,15 @@ const port = Number(process.env.PORT || 3000);
 initDb()
   .then(() => {
     if (pool) {
+      void (async () => {
+        try {
+          const concerns = await pool.query("SELECT id FROM concerns WHERE operating_wallet IS NULL");
+          for (const row of concerns.rows) await ensureOperatingWallet(pool, row.id);
+        } catch (error) {
+          console.error("operating wallet bootstrap failed", error);
+        }
+      })();
+
       startBrowserPoller(pool);
       startBalancePoller(pool);
       startFounderScheduler(pool, port);
