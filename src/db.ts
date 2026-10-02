@@ -105,6 +105,9 @@ export async function initDb() {
       completed_at TIMESTAMPTZ
     );
 
+    ALTER TABLE files ADD COLUMN IF NOT EXISTS content TEXT;
+    ALTER TABLE files ADD COLUMN IF NOT EXISTS source_url TEXT;
+
     CREATE TABLE IF NOT EXISTS browser_runs (
       run_id TEXT PRIMARY KEY,
       concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
