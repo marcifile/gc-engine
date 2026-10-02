@@ -98,6 +98,18 @@ export async function refreshBrowserRun(pool: Pool, stored: any) {
           String(result?.summary || "research completed").slice(0, 4000)
         ]
       );
+
+      await pool.query(
+        `UPDATE concerns
+         SET current_task = $1,
+             status = 'waiting',
+             updated_at = NOW()
+         WHERE id = $2`,
+        [
+          String(result?.suggestedNextStep || "review research and choose the next task").slice(0, 1000),
+          stored.concern_id
+        ]
+      );
     }
   }
 
