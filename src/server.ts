@@ -499,6 +499,89 @@ app.get("/concerns/:id/files/:fileId", async (req, res) => {
   res.json({ file: result.rows[0] });
 });
 
+app.get("/concerns/:id/calendar", async (req, res) => {
+  if (!pool) return res.json({ items: [] });
+  const result = await pool.query(
+    `SELECT id, title, status, desk, priority, assigned_to, scheduled_at, created_at, completed_at
+     FROM tasks
+     WHERE concern_id = $1 AND scheduled_at IS NOT NULL
+     ORDER BY scheduled_at ASC`,
+    [req.params.id]
+  );
+  res.json({ items: result.rows });
+});
+
+app.get("/concerns/:id/outbox", async (req, res) => {
+  if (!pool) return res.json({ actions: [] });
+  const result = await pool.query(
+    `SELECT id, action_type, title, status, payload, result, created_at, completed_at
+     FROM external_actions
+     WHERE concern_id = $1
+     ORDER BY created_at DESC
+     LIMIT 100`,
+    [req.params.id]
+  );
+  res.json({ actions: result.rows });
+});
+
+const actionSchema = z.object({
+  actionType: z.enum(["email", "publish", "form", "calendar", "drive", "purchase"]),
+  title: z.string().min(1).max(300),
+  payload: z.record(z.any()).default({})
+});
+
+app.post("/concerns/:id/outbox", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const parsed = actionSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_action", details: parsed.error.flatten() });
+
+  const concern = await pool.query("SELECT id FROM concerns WHERE id = $1", [req.params.id]);
+  if (!concern.rowCount) return res.status(404).json({ error: "concern_not_found" });
+
+  const id = crypto.randomUUID();
+  const result = await pool.query(
+    `INSERT INTO external_actions (id, concern_id, action_type, title, status, payload)
+     VALUES ($1, $2, $3, $4, 'queued', $5::jsonb)
+     RETURNING *`,
+    [id, req.params.id, parsed.data.actionType, parsed.data.title, JSON.stringify(parsed.data.payload)]
+  );
+  res.status(201).json({ action: result.rows[0] });
+});
+
+const calendarSchema = z.object({
+  title: z.string().min(1).max(300),
+  scheduledAt: z.string().datetime(),
+  assignedTo: z.enum(["company", "human"]).default("company"),
+  desk: z.string().max(80).optional(),
+  priority: z.number().int().min(1).max(10).default(5)
+});
+
+app.post("/concerns/:id/calendar", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const parsed = calendarSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_calendar_item", details: parsed.error.flatten() });
+
+  const concern = await pool.query("SELECT id FROM concerns WHERE id = $1", [req.params.id]);
+  if (!concern.rowCount) return res.status(404).json({ error: "concern_not_found" });
+
+  const id = crypto.randomUUID();
+  const result = await pool.query(
+    `INSERT INTO tasks (id, concern_id, title, status, desk, priority, assigned_to, scheduled_at)
+     VALUES ($1, $2, $3, 'queued', $4, $5, $6, $7)
+     RETURNING *`,
+    [
+      id,
+      req.params.id,
+      parsed.data.title,
+      parsed.data.desk || null,
+      parsed.data.priority,
+      parsed.data.assignedTo,
+      parsed.data.scheduledAt
+    ]
+  );
+  res.status(201).json({ item: result.rows[0] });
+});
+
 app.get("/concerns/:id/ledger", async (req, res) => {
   if (!pool) return res.json({ entries: [] });
   const result = await pool.query(
