@@ -48,6 +48,25 @@ memoryConcerns.set("mesa", {
   notes: []
 });
 
+app.get("/capabilities", (_req, res) => {
+  res.json({
+    capabilities: {
+      founder: Boolean(process.env.OPENROUTER_API_KEY),
+      browser: Boolean(process.env.BROWSERBASE_API_KEY),
+      solana: Boolean(process.env.HELIUS_API_KEY),
+      marketData: Boolean(process.env.BIRDEYE_API_KEY),
+      database: Boolean(pool),
+      files: true,
+      calendar: true,
+      outbox: true,
+      googleDrive: false,
+      gmail: false,
+      googleCalendar: false,
+      tokenLaunch: true
+    }
+  });
+});
+
 app.get("/health", async (_req, res) => {
   if (!pool) {
     return res.json({
