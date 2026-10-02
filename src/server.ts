@@ -312,7 +312,7 @@ app.get("/concerns/:id/live", async (req, res) => {
     );
 
     if (live.status === "COMPLETED" && live.result) {
-      await pool.query(
+      const completionEvent = await pool.query(
         `INSERT INTO events (id, concern_id, type, summary, metadata)
          SELECT $1, $2, 'browser_completed', $3, $4::jsonb
          WHERE NOT EXISTS (
@@ -320,7 +320,8 @@ app.get("/concerns/:id/live", async (req, res) => {
            WHERE concern_id = $2
              AND type = 'browser_completed'
              AND metadata->>'runId' = $5
-         )`,
+         )
+         RETURNING id`,
         [
           crypto.randomUUID(),
           req.params.id,
@@ -329,6 +330,63 @@ app.get("/concerns/:id/live", async (req, res) => {
           live.runId
         ]
       );
+
+      // Only turn a completed run into company artifacts once.
+      if (completionEvent.rowCount) {
+        const result: any = live.result;
+        const findings = Array.isArray(result?.findings) ? result.findings : [];
+        const lines = [
+          `# Research — ${new Date().toISOString().slice(0, 10)}`,
+          "",
+          result?.summary ? String(result.summary) : "Research session completed.",
+          "",
+          "## Findings",
+          ...findings.flatMap((f: any) => [
+            "",
+            `### ${String(f?.title || "Finding")}`,
+            f?.url ? String(f.url) : "",
+            String(f?.note || "")
+          ]),
+          "",
+          "## Suggested next step",
+          String(result?.suggestedNextStep || "Review the findings and choose the next piece of work."),
+          ""
+        ];
+
+        const filePath = `research/run-${live.runId}.md`;
+        await pool.query(
+          `INSERT INTO files (id, concern_id, path, mime_type, created_by, content, source_url)
+           VALUES ($1, $2, $3, 'text/markdown', 'research desk', $4, $5)
+           ON CONFLICT (concern_id, path)
+           DO UPDATE SET content = EXCLUDED.content, source_url = EXCLUDED.source_url`,
+          [
+            crypto.randomUUID(),
+            req.params.id,
+            filePath,
+            lines.join("\n"),
+            findings[0]?.url || null
+          ]
+        );
+
+        if (result?.summary) {
+          await pool.query(
+            `INSERT INTO memories (id, concern_id, kind, content, importance)
+             VALUES ($1, $2, 'research', $3, 7)`,
+            [crypto.randomUUID(), req.params.id, String(result.summary).slice(0, 8000)]
+          );
+        }
+
+        await pool.query(
+          `INSERT INTO tasks (id, concern_id, title, status, desk, priority, result_summary, completed_at)
+           VALUES ($1, $2, $3, 'completed', 'research', 5, $4, NOW())`,
+          [
+            crypto.randomUUID(),
+            req.params.id,
+            stored.task.slice(0, 500),
+            String(result?.summary || "research completed").slice(0, 4000)
+          ]
+        );
+      }
     }
 
     res.json({ live });
@@ -425,10 +483,20 @@ app.get("/concerns/:id/events", async (req, res) => {
 app.get("/concerns/:id/files", async (req, res) => {
   if (!pool) return res.json({ files: [] });
   const result = await pool.query(
-    "SELECT * FROM files WHERE concern_id = $1 ORDER BY created_at DESC",
+    "SELECT id, concern_id, path, mime_type, storage_url, source_url, created_by, created_at FROM files WHERE concern_id = $1 ORDER BY created_at DESC",
     [req.params.id]
   );
   res.json({ files: result.rows });
+});
+
+app.get("/concerns/:id/files/:fileId", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const result = await pool.query(
+    "SELECT * FROM files WHERE id = $1 AND concern_id = $2",
+    [req.params.fileId, req.params.id]
+  );
+  if (!result.rowCount) return res.status(404).json({ error: "file_not_found" });
+  res.json({ file: result.rows[0] });
 });
 
 app.get("/concerns/:id/ledger", async (req, res) => {
