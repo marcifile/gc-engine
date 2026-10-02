@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { initDb, pool, toConcern } from "./db.js";
 import { startBrowserWork, getBrowserWork } from "./browser.js";
 import { decideNextWork } from "./founder.js";
@@ -142,7 +143,7 @@ app.post("/concerns", async (req, res) => {
     await pool.query(
       `INSERT INTO events (id, concern_id, type, summary)
        VALUES ($1, $2, 'concern_created', $3)`,
-      [crypto.randomUUID(), parsed.data.id, `${parsed.data.name} started`]
+      [randomUUID(), parsed.data.id, `${parsed.data.name} started`]
     );
 
     res.status(201).json({ concern: toConcern(result.rows[0]) });
@@ -161,7 +162,7 @@ app.post("/concerns/:id/notes", async (req, res) => {
   if (!pool) {
     const concern = memoryConcerns.get(req.params.id);
     if (!concern) return res.status(404).json({ error: "concern_not_found" });
-    const note = { id: crypto.randomUUID(), text: parsed.data.text, createdAt: new Date().toISOString() };
+    const note = { id: randomUUID(), text: parsed.data.text, createdAt: new Date().toISOString() };
     concern.notes.unshift(note);
     return res.status(201).json({ note });
   }
@@ -169,7 +170,7 @@ app.post("/concerns/:id/notes", async (req, res) => {
   const concern = await pool.query("SELECT id FROM concerns WHERE id = $1", [req.params.id]);
   if (!concern.rowCount) return res.status(404).json({ error: "concern_not_found" });
 
-  const id = crypto.randomUUID();
+  const id = randomUUID();
   const result = await pool.query(
     `INSERT INTO notes (id, concern_id, text)
      VALUES ($1, $2, $3)
@@ -180,7 +181,7 @@ app.post("/concerns/:id/notes", async (req, res) => {
   await pool.query(
     `INSERT INTO events (id, concern_id, type, summary, metadata)
      VALUES ($1, $2, 'note_received', 'new note left on the desk', $3::jsonb)`,
-    [crypto.randomUUID(), req.params.id, JSON.stringify({ noteId: id })]
+    [randomUUID(), req.params.id, JSON.stringify({ noteId: id })]
   );
 
   res.status(201).json({
@@ -227,7 +228,7 @@ app.post("/concerns/:id/run", async (req, res) => {
         `INSERT INTO events (id, concern_id, type, summary, metadata)
          VALUES ($1, $2, 'founder_decision', $3, $4::jsonb)`,
         [
-          crypto.randomUUID(),
+          randomUUID(),
           concernId,
           decision.nextAction || decision.currentTask || "founder chose next work",
           JSON.stringify(decision)
@@ -324,7 +325,7 @@ app.get("/concerns/:id/live", async (req, res) => {
          )
          RETURNING id`,
         [
-          crypto.randomUUID(),
+          randomUUID(),
           req.params.id,
           "research desk finished its work",
           JSON.stringify({ runId: live.runId, result: live.result }),
@@ -361,7 +362,7 @@ app.get("/concerns/:id/live", async (req, res) => {
            ON CONFLICT (concern_id, path)
            DO UPDATE SET content = EXCLUDED.content, source_url = EXCLUDED.source_url`,
           [
-            crypto.randomUUID(),
+            randomUUID(),
             req.params.id,
             filePath,
             lines.join("\n"),
@@ -373,7 +374,7 @@ app.get("/concerns/:id/live", async (req, res) => {
           await pool.query(
             `INSERT INTO memories (id, concern_id, kind, content, importance)
              VALUES ($1, $2, 'research', $3, 7)`,
-            [crypto.randomUUID(), req.params.id, String(result.summary).slice(0, 8000)]
+            [randomUUID(), req.params.id, String(result.summary).slice(0, 8000)]
           );
         }
 
@@ -381,7 +382,7 @@ app.get("/concerns/:id/live", async (req, res) => {
           `INSERT INTO tasks (id, concern_id, title, status, desk, priority, result_summary, completed_at)
            VALUES ($1, $2, $3, 'completed', 'research', 5, $4, NOW())`,
           [
-            crypto.randomUUID(),
+            randomUUID(),
             req.params.id,
             stored.task.slice(0, 500),
             String(result?.summary || "research completed").slice(0, 4000)
@@ -451,7 +452,7 @@ app.post("/launch/prepare", async (req, res) => {
       `INSERT INTO events (id, concern_id, type, summary, metadata)
        VALUES ($1, $2, 'launch_prepared', 'pump launch transaction prepared', $3::jsonb)`,
       [
-        crypto.randomUUID(),
+        randomUUID(),
         parsed.data.concernId,
         JSON.stringify({ mint: parsed.data.mint, publicKey: parsed.data.publicKey, initialBuySol: parsed.data.initialBuySol })
       ]
@@ -487,7 +488,7 @@ app.post("/concerns/:id/launch/confirm", async (req, res) => {
     `INSERT INTO events (id, concern_id, type, summary, metadata)
      VALUES ($1, $2, 'token_launched', $3, $4::jsonb)`,
     [
-      crypto.randomUUID(),
+      randomUUID(),
       req.params.id,
       `${updated.rows[0].ticker} launched on pump`,
       JSON.stringify({ mintAddress: parsed.data.mintAddress, signature: parsed.data.signature })
@@ -620,7 +621,7 @@ app.post("/concerns/:id/outbox", async (req, res) => {
   const concern = await pool.query("SELECT id FROM concerns WHERE id = $1", [req.params.id]);
   if (!concern.rowCount) return res.status(404).json({ error: "concern_not_found" });
 
-  const id = crypto.randomUUID();
+  const id = randomUUID();
   const result = await pool.query(
     `INSERT INTO external_actions (id, concern_id, action_type, title, status, payload)
      VALUES ($1, $2, $3, $4, 'queued', $5::jsonb)
@@ -646,7 +647,7 @@ app.post("/concerns/:id/calendar", async (req, res) => {
   const concern = await pool.query("SELECT id FROM concerns WHERE id = $1", [req.params.id]);
   if (!concern.rowCount) return res.status(404).json({ error: "concern_not_found" });
 
-  const id = crypto.randomUUID();
+  const id = randomUUID();
   const result = await pool.query(
     `INSERT INTO tasks (id, concern_id, title, status, desk, priority, assigned_to, scheduled_at)
      VALUES ($1, $2, $3, 'queued', $4, $5, $6, $7)
