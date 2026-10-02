@@ -126,7 +126,8 @@ const createConcernSchema = z.object({
   extra: z.string().max(4000).optional(),
   staffing: z.enum(["automatic", "manual"]).optional(),
   externalActions: z.enum(["automatic", "ask"]).optional(),
-  initialBuySol: z.number().nonnegative().optional()
+  initialBuySol: z.number().nonnegative().optional(),
+  founderModel: z.enum(["anthropic/claude-sonnet-4", "openai/gpt-5.6", "google/gemini-2.5-pro", "x-ai/grok-4"]).optional()
 }).transform((data) => {
   const fallbackTicker = data.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase() || "GC";
   const category = (data.category || data.brief || "new company").slice(0, 120);
@@ -163,8 +164,8 @@ app.post("/concerns", async (req, res) => {
 
   try {
     const result = await pool.query(
-      `INSERT INTO concerns (id, name, ticker, category, summary, staffing_mode, external_actions_mode)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO concerns (id, name, ticker, category, summary, staffing_mode, external_actions_mode, founder_model)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         parsed.data.id,
@@ -173,7 +174,8 @@ app.post("/concerns", async (req, res) => {
         parsed.data.category,
         parsed.data.summary,
         parsed.data.staffing || "automatic",
-        parsed.data.externalActions || "automatic"
+        parsed.data.externalActions || "automatic",
+        parsed.data.founderModel || "anthropic/claude-sonnet-4"
       ]
     );
 
