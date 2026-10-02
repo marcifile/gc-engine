@@ -103,6 +103,19 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       completed_at TIMESTAMPTZ
     );
+
+    CREATE TABLE IF NOT EXISTS browser_runs (
+      run_id TEXT PRIMARY KEY,
+      concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
+      session_id TEXT,
+      status TEXT NOT NULL,
+      task TEXT NOT NULL,
+      live_view_url TEXT,
+      result JSONB,
+      cause JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 
   await pool.query(`
