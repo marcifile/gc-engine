@@ -12,6 +12,7 @@ import { getAsset, getSignatureStatus } from "./solana.js";
 import { preparePumpCreate } from "./pump.js";
 import { refreshBrowserRun, startBrowserPoller } from "./browserPoller.js";
 import { uploadTokenMetadata } from "./pinata.js";
+import { startFounderScheduler } from "./founderScheduler.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -249,6 +250,23 @@ app.post("/concerns/:id/run", async (req, res) => {
   }
 
   if (!company) return res.status(404).json({ error: "concern_not_found" });
+
+  if (pool) {
+    const active = await pool.query(
+      `SELECT run_id FROM browser_runs
+       WHERE concern_id = $1 AND status IN ('PENDING', 'RUNNING', 'PAUSED')
+       LIMIT 1`,
+      [concernId]
+    );
+    if (active.rowCount) {
+      return res.status(409).json({ error: "work_already_running", runId: active.rows[0].run_id });
+    }
+
+    await pool.query(
+      "UPDATE concerns SET last_work_at = NOW(), updated_at = NOW() WHERE id = $1",
+      [concernId]
+    );
+  }
 
   try {
     const decision = await decideNextWork(company);
@@ -667,6 +685,37 @@ app.get("/concerns/:id/token-metadata", async (req, res) => {
   }
 });
 
+const autonomySchema = z.object({
+  autoWork: z.boolean().optional(),
+  minWorkBalanceUsd: z.number().min(0).max(10000).optional()
+});
+
+app.patch("/concerns/:id/autonomy", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const parsed = autonomySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_autonomy_settings" });
+
+  const existing = await pool.query("SELECT * FROM concerns WHERE id = $1", [req.params.id]);
+  if (!existing.rowCount) return res.status(404).json({ error: "concern_not_found" });
+
+  const current = existing.rows[0];
+  const updated = await pool.query(
+    `UPDATE concerns
+     SET auto_work = $1,
+         min_work_balance_usd = $2,
+         updated_at = NOW()
+     WHERE id = $3
+     RETURNING *`,
+    [
+      parsed.data.autoWork ?? current.auto_work,
+      parsed.data.minWorkBalanceUsd ?? Number(current.min_work_balance_usd),
+      req.params.id
+    ]
+  );
+
+  res.json({ concern: toConcern(updated.rows[0]) });
+});
+
 app.get("/concerns/:id/events", async (req, res) => {
   if (!pool) return res.json({ events: [] });
   const result = await pool.query(
@@ -796,7 +845,10 @@ const port = Number(process.env.PORT || 3000);
 
 initDb()
   .then(() => {
-    if (pool) startBrowserPoller(pool);
+    if (pool) {
+      startBrowserPoller(pool);
+      startFounderScheduler(pool, port);
+    }
 
     app.listen(port, "0.0.0.0", () => {
       console.log(`gc-engine listening on :${port}`);
