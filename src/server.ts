@@ -515,7 +515,7 @@ app.get("/concerns/:id/replay", async (req, res) => {
     [req.params.id]
   );
 
-  if (!latest.rowCount) return res.status(404).json({ error: "replay_not_found" });
+  if (!latest.rowCount) return res.json({ replay: null });
 
   const sessionId = String(latest.rows[0].session_id);
   try {
