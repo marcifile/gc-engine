@@ -51,3 +51,10 @@ function numberOrNull(value: unknown): number | null {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
+
+
+export async function getSolPriceUsd(): Promise<number> {
+  const data = await getTokenMarket("So11111111111111111111111111111111111111112");
+  if (data.price === null || data.price <= 0) throw new Error("SOL price unavailable");
+  return data.price;
+}
