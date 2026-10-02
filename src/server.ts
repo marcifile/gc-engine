@@ -3,6 +3,8 @@ import express from "express";
 import cors from "cors";
 import { z } from "zod";
 import { initDb, pool, toConcern } from "./db.js";
+import { startBrowserWork, getBrowserWork } from "./browser.js";
+import { decideNextWork } from "./founder.js";
 
 const app = express();
 app.use(cors());
@@ -174,72 +176,168 @@ app.post("/concerns/:id/notes", async (req, res) => {
 
 app.post("/concerns/:id/run", async (req, res) => {
   const concernId = req.params.id;
-  const concern = !pool
-    ? memoryConcerns.get(concernId)
-    : (await pool.query("SELECT * FROM concerns WHERE id = $1", [concernId])).rows[0];
-
-  if (!concern) return res.status(404).json({ error: "concern_not_found" });
-  if (!process.env.OPENROUTER_API_KEY) {
-    return res.status(503).json({ error: "openrouter_not_configured" });
-  }
-
-  const company = !pool ? concern : toConcern(concern);
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": process.env.PUBLIC_APP_URL || "https://gc-engine-production.up.railway.app",
-      "X-Title": "GC"
-    },
-    body: JSON.stringify({
-      model: process.env.FOUNDER_MODEL || "anthropic/claude-sonnet-4",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are the persistent founder of a small company inside GC. Be practical, specific, and useful. Decide the single best next piece of work. Return strict JSON with keys currentTask, desk, reasoning, nextAction."
-        },
-        {
-          role: "user",
-          content: JSON.stringify(company)
-        }
-      ],
-      response_format: { type: "json_object" }
-    })
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    return res.status(502).json({ error: "founder_model_failed", detail: body.slice(0, 500) });
-  }
-
-  const data: any = await response.json();
-  const raw = data?.choices?.[0]?.message?.content || "{}";
-  let result: any;
-  try {
-    result = JSON.parse(raw);
-  } catch {
-    result = { currentTask: company.currentTask, desk: "founder", reasoning: raw, nextAction: raw };
-  }
+  let company: any;
 
   if (!pool) {
-    const item = memoryConcerns.get(concernId)!;
-    item.currentTask = result.currentTask || item.currentTask;
-    item.status = "working";
+    company = memoryConcerns.get(concernId);
   } else {
-    await pool.query(
-      "UPDATE concerns SET current_task = $1, status = 'working', updated_at = NOW() WHERE id = $2",
-      [result.currentTask || company.currentTask, concernId]
-    );
-    await pool.query(
-      `INSERT INTO events (id, concern_id, type, summary, metadata)
-       VALUES ($1, $2, 'founder_decision', $3, $4::jsonb)`,
-      [crypto.randomUUID(), concernId, result.nextAction || result.currentTask || "founder chose next work", JSON.stringify(result)]
-    );
+    const concernResult = await pool.query("SELECT * FROM concerns WHERE id = $1", [concernId]);
+    if (concernResult.rowCount) {
+      const notesResult = await pool.query(
+        "SELECT * FROM notes WHERE concern_id = $1 ORDER BY created_at DESC LIMIT 25",
+        [concernId]
+      );
+      company = toConcern(concernResult.rows[0], notesResult.rows);
+    }
   }
 
-  res.json({ run: result });
+  if (!company) return res.status(404).json({ error: "concern_not_found" });
+
+  try {
+    const decision = await decideNextWork(company);
+
+    if (!pool) {
+      const item = memoryConcerns.get(concernId)!;
+      item.currentTask = decision.currentTask || item.currentTask;
+      item.status = "working";
+    } else {
+      await pool.query(
+        "UPDATE concerns SET current_task = $1, status = 'working', updated_at = NOW() WHERE id = $2",
+        [decision.currentTask || company.currentTask, concernId]
+      );
+      await pool.query(
+        `INSERT INTO events (id, concern_id, type, summary, metadata)
+         VALUES ($1, $2, 'founder_decision', $3, $4::jsonb)`,
+        [
+          crypto.randomUUID(),
+          concernId,
+          decision.nextAction || decision.currentTask || "founder chose next work",
+          JSON.stringify(decision)
+        ]
+      );
+    }
+
+    let browserWork: any = null;
+
+    if (decision.needsBrowser && process.env.BROWSERBASE_API_KEY) {
+      const browserTask = [
+        `You are the research desk for ${company.name}, a company in ${company.category}.`,
+        `Current objective: ${decision.currentTask}.`,
+        `Specific next action: ${decision.nextAction}.`,
+        "Research this on the public web. Prefer primary sources and real user evidence.",
+        "Return concise findings with source URLs and one practical suggested next step.",
+        "Do not purchase anything, sign contracts, or submit sensitive personal information."
+      ].join("\n");
+
+      browserWork = await startBrowserWork(browserTask);
+
+      if (pool) {
+        await pool.query(
+          `INSERT INTO browser_runs
+           (run_id, concern_id, session_id, status, task, live_view_url)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (run_id) DO UPDATE
+           SET session_id = EXCLUDED.session_id,
+               status = EXCLUDED.status,
+               live_view_url = EXCLUDED.live_view_url,
+               updated_at = NOW()`,
+          [
+            browserWork.runId,
+            concernId,
+            browserWork.sessionId || null,
+            browserWork.status,
+            browserWork.task,
+            browserWork.liveViewUrl || null
+          ]
+        );
+      }
+    }
+
+    res.json({ run: decision, browserWork });
+  } catch (error: any) {
+    console.error(error);
+    res.status(502).json({ error: "founder_run_failed", detail: String(error?.message || error).slice(0, 1000) });
+  }
+});
+
+app.get("/concerns/:id/live", async (req, res) => {
+  if (!pool) return res.json({ live: null });
+
+  const latest = await pool.query(
+    "SELECT * FROM browser_runs WHERE concern_id = $1 ORDER BY created_at DESC LIMIT 1",
+    [req.params.id]
+  );
+
+  if (!latest.rowCount) return res.json({ live: null });
+
+  const stored = latest.rows[0];
+
+  try {
+    const live = await getBrowserWork(stored.run_id);
+
+    await pool.query(
+      `UPDATE browser_runs
+       SET session_id = $1,
+           status = $2,
+           live_view_url = $3,
+           result = $4::jsonb,
+           cause = $5::jsonb,
+           updated_at = NOW()
+       WHERE run_id = $6`,
+      [
+        live.sessionId || null,
+        live.status,
+        live.liveViewUrl || stored.live_view_url || null,
+        JSON.stringify(live.result ?? null),
+        JSON.stringify(live.cause ?? null),
+        stored.run_id
+      ]
+    );
+
+    if (live.status === "COMPLETED" && live.result) {
+      await pool.query(
+        `INSERT INTO events (id, concern_id, type, summary, metadata)
+         SELECT $1, $2, 'browser_completed', $3, $4::jsonb
+         WHERE NOT EXISTS (
+           SELECT 1 FROM events
+           WHERE concern_id = $2
+             AND type = 'browser_completed'
+             AND metadata->>'runId' = $5
+         )`,
+        [
+          crypto.randomUUID(),
+          req.params.id,
+          "research desk finished its work",
+          JSON.stringify({ runId: live.runId, result: live.result }),
+          live.runId
+        ]
+      );
+    }
+
+    res.json({ live });
+  } catch (error: any) {
+    res.json({
+      live: {
+        runId: stored.run_id,
+        sessionId: stored.session_id,
+        status: stored.status,
+        liveViewUrl: stored.live_view_url,
+        task: stored.task,
+        result: stored.result,
+        cause: stored.cause
+      },
+      refreshError: String(error?.message || error)
+    });
+  }
+});
+
+app.get("/concerns/:id/browser-runs", async (req, res) => {
+  if (!pool) return res.json({ runs: [] });
+  const result = await pool.query(
+    "SELECT * FROM browser_runs WHERE concern_id = $1 ORDER BY created_at DESC LIMIT 50",
+    [req.params.id]
+  );
+  res.json({ runs: result.rows });
 });
 
 app.get("/concerns/:id/events", async (req, res) => {
