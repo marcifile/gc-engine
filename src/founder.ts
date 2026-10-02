@@ -6,6 +6,7 @@ export type FounderDecision = {
   needsBrowser?: boolean;
   needsFiles?: boolean;
   needsHuman?: boolean;
+  costUsd?: number;
 };
 
 export async function decideNextWork(company: unknown): Promise<FounderDecision> {
@@ -58,16 +59,21 @@ export async function decideNextWork(company: unknown): Promise<FounderDecision>
     .replace(/\s*\`\`\`$/, "")
     .trim();
 
+  let parsed: FounderDecision;
   try {
-    return JSON.parse(cleaned) as FounderDecision;
+    parsed = JSON.parse(cleaned) as FounderDecision;
   } catch {
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
     if (start >= 0 && end > start) {
-      return JSON.parse(cleaned.slice(start, end + 1)) as FounderDecision;
+      parsed = JSON.parse(cleaned.slice(start, end + 1)) as FounderDecision;
+    } else {
+      throw new Error(`Founder returned invalid JSON: ${cleaned.slice(0, 500)}`);
     }
-    throw new Error(`Founder returned invalid JSON: ${cleaned.slice(0, 500)}`);
   }
+
+  parsed.costUsd = Number(data?.usage?.cost || 0);
+  return parsed;
 }
 
 
@@ -77,6 +83,7 @@ export type WorkArtifact = {
   content: string;
   summary: string;
   nextStep: string;
+  costUsd?: number;
 };
 
 export async function produceWorkArtifact(
@@ -154,6 +161,7 @@ export async function produceWorkArtifact(
     mimeType,
     content: String(parsed.content || "").slice(0, 100000),
     summary: String(parsed.summary || decision.currentTask).slice(0, 4000),
-    nextStep: String(parsed.nextStep || decision.nextAction).slice(0, 4000)
+    nextStep: String(parsed.nextStep || decision.nextAction).slice(0, 4000),
+    costUsd: Number(data?.usage?.cost || 0)
   };
 }
