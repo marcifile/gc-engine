@@ -19,7 +19,8 @@
     "@pump-fun/pump-sdk": "latest",
     "@pump-fun/pump-swap-sdk": "latest",
     "@solana/web3.js": "^1.98.4",
-    "@solana/spl-token": "^0.4.14"
+    "@solana/spl-token": "^0.4.14",
+    "playwright-core": "^1.55.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
