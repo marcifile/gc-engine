@@ -118,6 +118,7 @@ export async function initDb() {
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS creator_rewards_configured BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS creator_wallet TEXT;
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS operating_wallet TEXT;
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS founder_model TEXT NOT NULL DEFAULT 'anthropic/claude-sonnet-4';
 
 
     CREATE TABLE IF NOT EXISTS concern_wallets (
@@ -202,6 +203,7 @@ export function toConcern(row: any, notes: any[] = []) {
     creatorRewardsConfigured: Boolean(row.creator_rewards_configured),
     creatorWallet: row.creator_wallet ?? null,
     operatingWallet: row.operating_wallet ?? null,
+    founderModel: row.founder_model ?? "anthropic/claude-sonnet-4",
     notes: notes.map((n) => ({
       id: n.id,
       text: n.text,
