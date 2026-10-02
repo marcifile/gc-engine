@@ -2,12 +2,20 @@ import pg from "pg";
 
 const { Pool } = pg;
 
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : undefined
-});
+export const hasDatabase = Boolean(process.env.DATABASE_URL);
+export const pool = hasDatabase
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    })
+  : null;
 
 export async function initDb() {
+  if (!pool) {
+    console.warn("DATABASE_URL not set; running in temporary memory mode");
+    return;
+  }
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS concerns (
       id TEXT PRIMARY KEY,
