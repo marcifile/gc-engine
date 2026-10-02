@@ -353,7 +353,8 @@ app.post("/concerns/:id/run", async (req, res) => {
 
     const allowedTools = Array.isArray(company.allowedTools) ? company.allowedTools : ["browser","google_drive","gmail","calendar","solana","market_data","ipfs"];
 
-    if (decision.needsBrowser && allowedTools.includes("browser") && process.env.BROWSERBASE_API_KEY) {
+    const showcaseNeedsBrowser = concernId === process.env.GC_SHOWCASE_CONCERN;
+    if ((decision.needsBrowser || showcaseNeedsBrowser) && allowedTools.includes("browser") && process.env.BROWSERBASE_API_KEY) {
       const browserTask = [
         `You are the research desk for ${company.name}, a company in ${company.category}.`,
         `Current objective: ${decision.currentTask}.`,
