@@ -127,7 +127,7 @@ const createConcernSchema = z.object({
   staffing: z.enum(["automatic", "manual"]).optional(),
   externalActions: z.enum(["automatic", "ask"]).optional(),
   initialBuySol: z.number().nonnegative().optional(),
-  founderModel: z.enum(["anthropic/claude-sonnet-4", "openai/gpt-5.6", "google/gemini-2.5-pro", "x-ai/grok-4"]).optional()
+  founderModel: z.enum(["anthropic/claude-sonnet-5.5", "openai/gpt-6.1-sol", "google/gemini-3.5-flash"]).optional()
 }).transform((data) => {
   const fallbackTicker = data.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase() || "GC";
   const category = (data.category || data.brief || "new company").slice(0, 120);
@@ -175,7 +175,7 @@ app.post("/concerns", async (req, res) => {
         parsed.data.summary,
         parsed.data.staffing || "automatic",
         parsed.data.externalActions || "automatic",
-        parsed.data.founderModel || "anthropic/claude-sonnet-4"
+        parsed.data.founderModel || "anthropic/claude-sonnet-5.5"
       ]
     );
 
