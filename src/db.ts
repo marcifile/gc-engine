@@ -115,6 +115,18 @@ export async function initDb() {
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS min_work_balance_usd NUMERIC NOT NULL DEFAULT 0.05;
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS external_actions_mode TEXT NOT NULL DEFAULT 'automatic';
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS staffing_mode TEXT NOT NULL DEFAULT 'automatic';
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS creator_rewards_configured BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS creator_wallet TEXT;
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS operating_wallet TEXT;
+
+
+    CREATE TABLE IF NOT EXISTS concern_wallets (
+      concern_id TEXT PRIMARY KEY REFERENCES concerns(id) ON DELETE CASCADE,
+      public_key TEXT NOT NULL UNIQUE,
+      secret_key_enc TEXT NOT NULL,
+      purpose TEXT NOT NULL DEFAULT 'operating',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
 
     CREATE TABLE IF NOT EXISTS integrations (
       id UUID PRIMARY KEY,
@@ -187,6 +199,9 @@ export function toConcern(row: any, notes: any[] = []) {
     minWorkBalanceUsd: Number(row.min_work_balance_usd ?? 0.05),
     externalActionsMode: row.external_actions_mode ?? "automatic",
     staffingMode: row.staffing_mode ?? "automatic",
+    creatorRewardsConfigured: Boolean(row.creator_rewards_configured),
+    creatorWallet: row.creator_wallet ?? null,
+    operatingWallet: row.operating_wallet ?? null,
     notes: notes.map((n) => ({
       id: n.id,
       text: n.text,
