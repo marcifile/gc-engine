@@ -159,10 +159,18 @@ app.post("/concerns", async (req, res) => {
 
   try {
     const result = await pool.query(
-      `INSERT INTO concerns (id, name, ticker, category, summary)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO concerns (id, name, ticker, category, summary, staffing_mode, external_actions_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [parsed.data.id, parsed.data.name, parsed.data.ticker.toUpperCase(), parsed.data.category, parsed.data.summary]
+      [
+        parsed.data.id,
+        parsed.data.name,
+        parsed.data.ticker.toUpperCase(),
+        parsed.data.category,
+        parsed.data.summary,
+        parsed.data.staffing || "automatic",
+        parsed.data.externalActions || "automatic"
+      ]
     );
 
     await pool.query(
@@ -687,7 +695,9 @@ app.get("/concerns/:id/token-metadata", async (req, res) => {
 
 const autonomySchema = z.object({
   autoWork: z.boolean().optional(),
-  minWorkBalanceUsd: z.number().min(0).max(10000).optional()
+  minWorkBalanceUsd: z.number().min(0).max(10000).optional(),
+  externalActionsMode: z.enum(["automatic", "ask"]).optional(),
+  staffingMode: z.enum(["automatic", "manual"]).optional()
 });
 
 app.patch("/concerns/:id/autonomy", async (req, res) => {
@@ -703,12 +713,16 @@ app.patch("/concerns/:id/autonomy", async (req, res) => {
     `UPDATE concerns
      SET auto_work = $1,
          min_work_balance_usd = $2,
+         external_actions_mode = $3,
+         staffing_mode = $4,
          updated_at = NOW()
-     WHERE id = $3
+     WHERE id = $5
      RETURNING *`,
     [
       parsed.data.autoWork ?? current.auto_work,
       parsed.data.minWorkBalanceUsd ?? Number(current.min_work_balance_usd),
+      parsed.data.externalActionsMode ?? current.external_actions_mode,
+      parsed.data.staffingMode ?? current.staffing_mode,
       req.params.id
     ]
   );
