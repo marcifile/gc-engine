@@ -500,6 +500,82 @@ app.get("/concerns/:id/funding", async (req, res) => {
   }
 });
 
+app.get("/concerns/:id/replay", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  if (!process.env.BROWSERBASE_API_KEY) return res.status(503).json({ error: "browser_not_configured" });
+
+  const latest = await pool.query(
+    `SELECT session_id, run_id, status
+     FROM browser_runs
+     WHERE concern_id = $1 AND session_id IS NOT NULL
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [req.params.id]
+  );
+
+  if (!latest.rowCount) return res.status(404).json({ error: "replay_not_found" });
+
+  const sessionId = String(latest.rows[0].session_id);
+  try {
+    const response = await fetch(`https://api.browserbase.com/v1/sessions/${encodeURIComponent(sessionId)}/replays`, {
+      headers: { "x-bb-api-key": process.env.BROWSERBASE_API_KEY }
+    });
+    const body: any = await response.json().catch(() => null);
+    if (!response.ok || !body?.pages?.length) {
+      return res.status(response.status || 502).json({ error: "replay_unavailable", detail: body });
+    }
+
+    res.json({
+      replay: {
+        runId: latest.rows[0].run_id,
+        status: latest.rows[0].status,
+        pageCount: Number(body.pageCount || body.pages.length),
+        pages: body.pages.map((page: any) => ({
+          pageId: String(page.pageId),
+          startTimeMs: Number(page.startTimeMs || 0),
+          endTimeMs: Number(page.endTimeMs || 0),
+          playlistUrl: `/concerns/${encodeURIComponent(req.params.id)}/replay/${encodeURIComponent(String(page.pageId))}`
+        }))
+      }
+    });
+  } catch (error: any) {
+    res.status(502).json({ error: "replay_lookup_failed", detail: String(error?.message || error).slice(0, 700) });
+  }
+});
+
+app.get("/concerns/:id/replay/:pageId", async (req, res) => {
+  if (!pool) return res.status(503).send("database required");
+  if (!process.env.BROWSERBASE_API_KEY) return res.status(503).send("browser not configured");
+
+  const latest = await pool.query(
+    `SELECT session_id
+     FROM browser_runs
+     WHERE concern_id = $1 AND session_id IS NOT NULL
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [req.params.id]
+  );
+  if (!latest.rowCount) return res.status(404).send("replay not found");
+
+  const sessionId = String(latest.rows[0].session_id);
+  const pageId = String(req.params.pageId).replace(/[^0-9]/g, "");
+  if (!pageId) return res.status(400).send("invalid page");
+
+  try {
+    const response = await fetch(
+      `https://api.browserbase.com/v1/sessions/${encodeURIComponent(sessionId)}/replays/${encodeURIComponent(pageId)}`,
+      { headers: { "x-bb-api-key": process.env.BROWSERBASE_API_KEY } }
+    );
+    const body = await response.text();
+    if (!response.ok) return res.status(response.status).send(body.slice(0, 1000));
+    res.setHeader("Content-Type", response.headers.get("content-type") || "application/vnd.apple.mpegurl");
+    res.setHeader("Cache-Control", "private, max-age=30");
+    res.send(body);
+  } catch (error: any) {
+    res.status(502).send(String(error?.message || error).slice(0, 700));
+  }
+});
+
 app.get("/concerns/:id/live", async (req, res) => {
   if (!pool) return res.json({ live: null });
 
