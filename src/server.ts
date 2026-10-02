@@ -13,6 +13,7 @@ import { preparePumpCreate } from "./pump.js";
 import { refreshBrowserRun, startBrowserPoller } from "./browserPoller.js";
 import { uploadTokenMetadata } from "./pinata.js";
 import { startFounderScheduler } from "./founderScheduler.js";
+import { buildGoogleAuthUrl, createCalendarEvent, exchangeGoogleCode, googleConfigured, saveGoogleIntegration, sendGmail, uploadFileToDrive } from "./google.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -63,9 +64,9 @@ app.get("/capabilities", (_req, res) => {
       files: true,
       calendar: true,
       outbox: true,
-      googleDrive: false,
-      gmail: false,
-      googleCalendar: false,
+      googleDrive: googleConfigured(),
+      gmail: googleConfigured(),
+      googleCalendar: googleConfigured(),
       tokenLaunch: true,
       metadataStorage: Boolean(process.env.PINATA_JWT)
     }
@@ -756,6 +757,175 @@ app.get("/concerns/:id/files/:fileId", async (req, res) => {
   );
   if (!result.rowCount) return res.status(404).json({ error: "file_not_found" });
   res.json({ file: result.rows[0] });
+});
+
+app.get("/concerns/:id/integrations", async (req, res) => {
+  if (!pool) return res.json({ integrations: {} });
+
+  const result = await pool.query(
+    "SELECT provider, scopes, expires_at, created_at, updated_at FROM integrations WHERE concern_id = $1",
+    [req.params.id]
+  );
+
+  const integrations: Record<string, any> = {};
+  for (const row of result.rows) {
+    integrations[row.provider] = {
+      connected: true,
+      scopes: row.scopes || [],
+      expiresAt: row.expires_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  res.json({
+    integrations,
+    available: {
+      google: googleConfigured()
+    }
+  });
+});
+
+app.get("/integrations/google/start", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  if (!googleConfigured()) return res.status(503).json({ error: "google_not_configured" });
+
+  const concernId = String(req.query.concernId || "");
+  if (!concernId) return res.status(400).json({ error: "concern_id_required" });
+
+  const concern = await pool.query("SELECT id FROM concerns WHERE id = $1", [concernId]);
+  if (!concern.rowCount) return res.status(404).json({ error: "concern_not_found" });
+
+  const state = randomUUID();
+  await pool.query(
+    `INSERT INTO oauth_states (state, concern_id)
+     VALUES ($1, $2)`,
+    [state, concernId]
+  );
+
+  res.json({ authUrl: buildGoogleAuthUrl(state) });
+});
+
+app.get("/integrations/google/callback", async (req, res) => {
+  if (!pool) return res.status(503).send("database unavailable");
+
+  const code = String(req.query.code || "");
+  const state = String(req.query.state || "");
+  if (!code || !state) return res.status(400).send("missing OAuth code or state");
+
+  const stateResult = await pool.query(
+    `DELETE FROM oauth_states
+     WHERE state = $1 AND expires_at > NOW()
+     RETURNING concern_id`,
+    [state]
+  );
+
+  if (!stateResult.rowCount) return res.status(400).send("expired or invalid OAuth state");
+
+  try {
+    const token = await exchangeGoogleCode(code);
+    await saveGoogleIntegration(pool, stateResult.rows[0].concern_id, token);
+    res
+      .status(200)
+      .type("html")
+      .send(`<!doctype html><html><body style="font-family:monospace;padding:32px">google connected to gc.<br><br>you can close this window.<script>setTimeout(()=>window.close(),1200)</script></body></html>`);
+  } catch (error: any) {
+    console.error(error);
+    res.status(502).send("google connection failed");
+  }
+});
+
+app.delete("/concerns/:id/integrations/google", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  await pool.query(
+    "DELETE FROM integrations WHERE concern_id = $1 AND provider = 'google'",
+    [req.params.id]
+  );
+  res.json({ disconnected: true });
+});
+
+app.post("/concerns/:id/google/drive/:fileId", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const fileResult = await pool.query(
+    "SELECT * FROM files WHERE concern_id = $1 AND id = $2",
+    [req.params.id, req.params.fileId]
+  );
+  if (!fileResult.rowCount) return res.status(404).json({ error: "file_not_found" });
+
+  try {
+    const result: any = await uploadFileToDrive(pool, req.params.id, fileResult.rows[0]);
+    await pool.query(
+      `INSERT INTO external_actions
+       (id, concern_id, action_type, title, status, payload, result, completed_at)
+       VALUES ($1, $2, 'drive', $3, 'completed', $4::jsonb, $5::jsonb, NOW())`,
+      [
+        randomUUID(),
+        req.params.id,
+        `sent ${fileResult.rows[0].path} to Google Drive`,
+        JSON.stringify({ fileId: req.params.fileId }),
+        JSON.stringify(result)
+      ]
+    );
+    res.json({ file: result });
+  } catch (error: any) {
+    res.status(502).json({ error: "drive_upload_failed", detail: String(error?.message || error).slice(0, 1000) });
+  }
+});
+
+const googleCalendarSchema = z.object({
+  summary: z.string().min(1).max(300),
+  description: z.string().max(4000).optional(),
+  start: z.string().datetime(),
+  end: z.string().datetime()
+});
+
+app.post("/concerns/:id/google/calendar", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const parsed = googleCalendarSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_calendar_event" });
+
+  try {
+    const result: any = await createCalendarEvent(pool, req.params.id, parsed.data);
+    await pool.query(
+      `INSERT INTO external_actions
+       (id, concern_id, action_type, title, status, payload, result, completed_at)
+       VALUES ($1, $2, 'calendar', $3, 'completed', $4::jsonb, $5::jsonb, NOW())`,
+      [randomUUID(), req.params.id, parsed.data.summary, JSON.stringify(parsed.data), JSON.stringify(result)]
+    );
+    res.json({ event: result });
+  } catch (error: any) {
+    res.status(502).json({ error: "calendar_create_failed", detail: String(error?.message || error).slice(0, 1000) });
+  }
+});
+
+const googleEmailSchema = z.object({
+  to: z.string().email(),
+  subject: z.string().min(1).max(300),
+  body: z.string().min(1).max(50000)
+});
+
+app.post("/concerns/:id/google/email", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const parsed = googleEmailSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_email" });
+
+  try {
+    const result: any = await sendGmail(pool, req.params.id, parsed.data);
+    await pool.query(
+      `INSERT INTO external_actions
+       (id, concern_id, action_type, title, status, payload, result, completed_at)
+       VALUES ($1, $2, 'email', $3, 'completed', $4::jsonb, $5::jsonb, NOW())`,
+      [
+        randomUUID(),
+        req.params.id,
+        parsed.data.subject,
+        JSON.stringify({ to: parsed.data.to, subject: parsed.data.subject }),
+        JSON.stringify(result)
+      ]
+    );
+    res.json({ message: result });
+  } catch (error: any) {
+    res.status(502).json({ error: "email_send_failed", detail: String(error?.message || error).slice(0, 1000) });
+  }
 });
 
 app.get("/concerns/:id/calendar", async (req, res) => {
