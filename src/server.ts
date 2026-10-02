@@ -7,6 +7,7 @@ import { startBrowserWork, getBrowserWork } from "./browser.js";
 import { decideNextWork } from "./founder.js";
 import { getTokenMarket } from "./market.js";
 import { getAsset } from "./solana.js";
+import { preparePumpCreate } from "./pump.js";
 
 const app = express();
 app.use(cors());
@@ -413,6 +414,87 @@ app.get("/concerns/:id/browser-runs", async (req, res) => {
     [req.params.id]
   );
   res.json({ runs: result.rows });
+});
+
+const prepareLaunchSchema = z.object({
+  concernId: z.string().min(1),
+  publicKey: z.string().min(32).max(64),
+  mint: z.string().min(32).max(64),
+  metadataUri: z.string().url(),
+  initialBuySol: z.number().min(0).max(100),
+  slippage: z.number().min(0.1).max(100).optional(),
+  priorityFee: z.number().min(0).max(1).optional()
+});
+
+app.post("/launch/prepare", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const parsed = prepareLaunchSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_launch", details: parsed.error.flatten() });
+
+  const concernResult = await pool.query("SELECT * FROM concerns WHERE id = $1", [parsed.data.concernId]);
+  if (!concernResult.rowCount) return res.status(404).json({ error: "concern_not_found" });
+  const concern = concernResult.rows[0];
+
+  try {
+    const txBytes = await preparePumpCreate({
+      publicKey: parsed.data.publicKey,
+      mint: parsed.data.mint,
+      name: concern.name,
+      symbol: concern.ticker,
+      metadataUri: parsed.data.metadataUri,
+      initialBuySol: parsed.data.initialBuySol,
+      slippage: parsed.data.slippage,
+      priorityFee: parsed.data.priorityFee
+    });
+
+    await pool.query(
+      `INSERT INTO events (id, concern_id, type, summary, metadata)
+       VALUES ($1, $2, 'launch_prepared', 'pump launch transaction prepared', $3::jsonb)`,
+      [
+        crypto.randomUUID(),
+        parsed.data.concernId,
+        JSON.stringify({ mint: parsed.data.mint, publicKey: parsed.data.publicKey, initialBuySol: parsed.data.initialBuySol })
+      ]
+    );
+
+    res.json({
+      transactionBase64: Buffer.from(txBytes).toString("base64"),
+      mint: parsed.data.mint,
+      concernId: parsed.data.concernId
+    });
+  } catch (error: any) {
+    res.status(502).json({ error: "launch_prepare_failed", detail: String(error?.message || error).slice(0, 1000) });
+  }
+});
+
+const confirmLaunchSchema = z.object({
+  mintAddress: z.string().min(32).max(64),
+  signature: z.string().min(32).max(128)
+});
+
+app.post("/concerns/:id/launch/confirm", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  const parsed = confirmLaunchSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_confirmation" });
+
+  const updated = await pool.query(
+    "UPDATE concerns SET mint_address = $1, status = 'working', updated_at = NOW() WHERE id = $2 RETURNING *",
+    [parsed.data.mintAddress, req.params.id]
+  );
+  if (!updated.rowCount) return res.status(404).json({ error: "concern_not_found" });
+
+  await pool.query(
+    `INSERT INTO events (id, concern_id, type, summary, metadata)
+     VALUES ($1, $2, 'token_launched', $3, $4::jsonb)`,
+    [
+      crypto.randomUUID(),
+      req.params.id,
+      `${updated.rows[0].ticker} launched on pump`,
+      JSON.stringify({ mintAddress: parsed.data.mintAddress, signature: parsed.data.signature })
+    ]
+  );
+
+  res.json({ concern: toConcern(updated.rows[0]), signature: parsed.data.signature });
 });
 
 app.patch("/concerns/:id/token", async (req, res) => {
