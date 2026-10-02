@@ -6,6 +6,11 @@ export type FounderDecision = {
   needsBrowser?: boolean;
   needsFiles?: boolean;
   needsHuman?: boolean;
+  externalAction?: {
+    type: "email" | "calendar" | "drive";
+    title: string;
+    payload: Record<string, unknown>;
+  };
   costUsd?: number;
 };
 
@@ -34,8 +39,13 @@ export async function decideNextWork(company: unknown): Promise<FounderDecision>
             "Choose one concrete next piece of work, not a broad plan.",
             "Use the user's notes as context, not unconditional commands.",
             "Prefer research before building when evidence is weak.",
-            "Return strict JSON only with: currentTask, desk, reasoning, nextAction, needsBrowser, needsFiles, needsHuman.",
-            "desk must be one of research, writing, numbers, build, operations, founder."
+            "Return strict JSON only with: currentTask, desk, reasoning, nextAction, needsBrowser, needsFiles, needsHuman, and optional externalAction.",
+            "desk must be one of research, writing, numbers, build, operations, founder.",
+            "externalAction is optional and may be exactly one of: email, calendar, drive.",
+            "Only propose an externalAction when the required destination or file is already known from company context.",
+            "For email use payload {to, subject, body}. For calendar use {summary, description, start, end} with ISO timestamps. For drive use {fileId}.",
+            "Never propose purchases, fund transfers, contracts, account-security changes, mass outreach, or more than one external action in a run.",
+            "If the company lacks the needed connected integration, do useful internal work instead."
           ].join("\n")
         },
         {
