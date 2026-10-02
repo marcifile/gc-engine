@@ -55,6 +55,7 @@ export async function decideNextWork(company: unknown): Promise<FounderDecision>
             "Only propose an externalAction when the required destination or file is already known from company context.",
             "For email use payload {to, subject, body}. For calendar use {summary, description, start, end} with ISO timestamps. For drive use {fileId}.",
             "Never propose purchases, fund transfers, contracts, account-security changes, mass outreach, or more than one external action in a run.",
+            "Only use or propose tools listed in company.allowedTools when that field is present.",
             "If the company lacks the needed connected integration, do useful internal work instead."
           ].join("\n")
         },
