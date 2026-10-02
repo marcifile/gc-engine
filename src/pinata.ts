@@ -31,7 +31,9 @@ async function uploadPinataFile(file: Blob, filename: string): Promise<string> {
 }
 
 export async function uploadTokenMetadata(input: TokenMetadataInput) {
-  const imageBlob = new Blob([input.image.buffer], { type: input.image.mimeType || "application/octet-stream" });
+  const imageBytes = new Uint8Array(input.image.buffer.byteLength);
+  imageBytes.set(input.image.buffer);
+  const imageBlob = new Blob([imageBytes.buffer], { type: input.image.mimeType || "application/octet-stream" });
   const imageCid = await uploadPinataFile(imageBlob, input.image.filename || "token-image");
   const imageUri = `https://ipfs.io/ipfs/${imageCid}`;
 
