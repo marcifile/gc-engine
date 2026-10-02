@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getBrowserWork } from "./browser.js";
 
 export async function refreshBrowserRun(pool: Pool, stored: any) {
-  const live = await getBrowserWork(stored.run_id);
+  const live = await getBrowserWork(stored.run_id, stored.session_id || undefined);
 
   await pool.query(
     `UPDATE browser_runs
@@ -15,7 +15,7 @@ export async function refreshBrowserRun(pool: Pool, stored: any) {
          updated_at = NOW()
      WHERE run_id = $6`,
     [
-      live.sessionId || null,
+      live.sessionId || stored.session_id || null,
       live.status,
       live.liveViewUrl || stored.live_view_url || null,
       JSON.stringify(live.result ?? null),
