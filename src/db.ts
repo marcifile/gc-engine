@@ -109,6 +109,9 @@ export async function initDb() {
     ALTER TABLE files ADD COLUMN IF NOT EXISTS source_url TEXT;
     ALTER TABLE tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
     ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to TEXT DEFAULT 'company';
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS auto_work BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS last_work_at TIMESTAMPTZ;
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS min_work_balance_usd NUMERIC NOT NULL DEFAULT 0.05;
 
     CREATE TABLE IF NOT EXISTS browser_runs (
       run_id TEXT PRIMARY KEY,
@@ -154,6 +157,9 @@ export function toConcern(row: any, notes: any[] = []) {
     externalRevenueUsd: Number(row.external_revenue_usd),
     marketCapUsd: Number(row.market_cap_usd),
     day: row.day,
+    autoWork: row.auto_work ?? true,
+    lastWorkAt: row.last_work_at ?? null,
+    minWorkBalanceUsd: Number(row.min_work_balance_usd ?? 0.05),
     notes: notes.map((n) => ({
       id: n.id,
       text: n.text,
