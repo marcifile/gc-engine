@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 
 const GOOGLE_SCOPES = [
@@ -129,14 +129,14 @@ export async function saveGoogleIntegration(
   await pool.query(
     `INSERT INTO integrations
       (id, concern_id, provider, access_token_enc, refresh_token_enc, expires_at, scopes, updated_at)
-     VALUES (gen_random_uuid(), $1, 'google', $2, $3, $4, $5, NOW())
+     VALUES ($1, $2, 'google', $3, $4, $5, $6, NOW())
      ON CONFLICT (concern_id, provider)
      DO UPDATE SET access_token_enc = EXCLUDED.access_token_enc,
                    refresh_token_enc = COALESCE(EXCLUDED.refresh_token_enc, integrations.refresh_token_enc),
                    expires_at = EXCLUDED.expires_at,
                    scopes = EXCLUDED.scopes,
                    updated_at = NOW()`,
-    [concernId, encryptToken(token.access_token), refreshTokenEnc, expiresAt, scopes]
+    [randomUUID(), concernId, encryptToken(token.access_token), refreshTokenEnc, expiresAt, scopes]
   );
 }
 
