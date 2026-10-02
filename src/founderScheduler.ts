@@ -14,7 +14,11 @@ export function startFounderScheduler(pool: Pool, port: number, intervalMs = 60_
          WHERE c.auto_work = TRUE
            AND (c.mint_address IS NOT NULL OR c.id = $1)
            AND (c.operating_balance_usd >= c.min_work_balance_usd OR c.id = $1)
-           AND (c.last_work_at IS NULL OR c.last_work_at < NOW() - INTERVAL '10 minutes')
+           AND (
+             c.last_work_at IS NULL
+             OR (c.id = $1 AND c.last_work_at < NOW() - INTERVAL '2 minutes')
+             OR (c.id <> $1 AND c.last_work_at < NOW() - INTERVAL '10 minutes')
+           )
            AND NOT EXISTS (
              SELECT 1 FROM browser_runs br
              WHERE br.concern_id = c.id
