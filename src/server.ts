@@ -602,6 +602,22 @@ initDb()
   .then(() => {
     app.listen(port, "0.0.0.0", () => {
       console.log(`gc-engine listening on :${port}`);
+
+      const bootTestConcern = process.env.GC_BOOT_TEST_CONCERN;
+      if (bootTestConcern) {
+        setTimeout(async () => {
+          try {
+            const response = await fetch(
+              `http://127.0.0.1:${port}/concerns/${encodeURIComponent(bootTestConcern)}/run`,
+              { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
+            );
+            const body = await response.text();
+            console.log("GC_BOOT_TEST", response.status, body.slice(0, 2000));
+          } catch (error) {
+            console.error("GC_BOOT_TEST failed", error);
+          }
+        }, 1500);
+      }
     });
   })
   .catch((error) => {
