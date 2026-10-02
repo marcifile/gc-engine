@@ -272,6 +272,22 @@ app.post("/concerns/:id/run", async (req, res) => {
           JSON.stringify(decision)
         ]
       );
+
+      if (Number(decision.costUsd || 0) > 0) {
+        const cost = Number(decision.costUsd);
+        await pool.query(
+          `INSERT INTO ledger_entries (id, concern_id, kind, amount_usd, description)
+           VALUES ($1, $2, 'compute', $3, 'founder inference')`,
+          [randomUUID(), concernId, -cost]
+        );
+        await pool.query(
+          `UPDATE concerns
+           SET operating_balance_usd = GREATEST(0, operating_balance_usd - $1),
+               updated_at = NOW()
+           WHERE id = $2`,
+          [cost, concernId]
+        );
+      }
     }
 
     let browserWork: any = null;
@@ -360,6 +376,21 @@ app.post("/concerns/:id/run", async (req, res) => {
           JSON.stringify({ path: artifact.path, nextStep: artifact.nextStep })
         ]
       );
+
+      if (Number(artifact.costUsd || 0) > 0) {
+        const artifactCost = Number(artifact.costUsd);
+        await pool.query(
+          `INSERT INTO ledger_entries (id, concern_id, kind, amount_usd, description)
+           VALUES ($1, $2, 'compute', $3, $4)`,
+          [randomUUID(), concernId, -artifactCost, `${decision.desk} desk inference`]
+        );
+        await pool.query(
+          `UPDATE concerns
+           SET operating_balance_usd = GREATEST(0, operating_balance_usd - $1)
+           WHERE id = $2`,
+          [artifactCost, concernId]
+        );
+      }
 
       await pool.query(
         "UPDATE concerns SET current_task = $1, status = 'waiting', updated_at = NOW() WHERE id = $2",
