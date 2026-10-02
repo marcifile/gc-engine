@@ -107,6 +107,8 @@ export async function initDb() {
 
     ALTER TABLE files ADD COLUMN IF NOT EXISTS content TEXT;
     ALTER TABLE files ADD COLUMN IF NOT EXISTS source_url TEXT;
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to TEXT DEFAULT 'company';
 
     CREATE TABLE IF NOT EXISTS browser_runs (
       run_id TEXT PRIMARY KEY,
