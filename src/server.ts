@@ -8,6 +8,8 @@ import { initDb, pool, toConcern } from "./db.js";
 import { startBrowserWork, getBrowserWork } from "./browser.js";
 import { decideNextWork, produceWorkArtifact } from "./founder.js";
 import { getTokenMarket } from "./market.js";
+import { ensureOperatingWallet } from "./operatingWallet.js";
+import { refreshOperatingBalance, startBalancePoller } from "./balancePoller.js";
 import { getAsset, getSignatureStatus } from "./solana.js";
 import { preparePumpCreate } from "./pump.js";
 import { refreshBrowserRun, startBrowserPoller } from "./browserPoller.js";
@@ -181,7 +183,16 @@ app.post("/concerns", async (req, res) => {
       [randomUUID(), parsed.data.id, `${parsed.data.name} started`]
     );
 
-    res.status(201).json({ concern: toConcern(result.rows[0]) });
+    const operatingWallet = await ensureOperatingWallet(pool, parsed.data.id);
+    const withWallet = await pool.query("SELECT * FROM concerns WHERE id = $1", [parsed.data.id]);
+
+    await pool.query(
+      `INSERT INTO events (id, concern_id, type, summary, metadata)
+       VALUES ($1, $2, 'operating_wallet_created', 'company operating wallet created', $3::jsonb)`,
+      [randomUUID(), parsed.data.id, JSON.stringify({ publicKey: operatingWallet })]
+    );
+
+    res.status(201).json({ concern: toConcern(withWallet.rows[0]) });
   } catch (error: any) {
     if (error?.code === "23505") return res.status(409).json({ error: "concern_exists" });
     throw error;
@@ -455,6 +466,31 @@ app.post("/concerns/:id/run", async (req, res) => {
   } catch (error: any) {
     console.error(error);
     res.status(502).json({ error: "founder_run_failed", detail: String(error?.message || error).slice(0, 1000) });
+  }
+});
+
+app.get("/concerns/:id/funding", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+
+  try {
+    let concern = await pool.query("SELECT * FROM concerns WHERE id = $1", [req.params.id]);
+    if (!concern.rowCount) return res.status(404).json({ error: "concern_not_found" });
+
+    let wallet = concern.rows[0].operating_wallet;
+    if (!wallet) {
+      wallet = await ensureOperatingWallet(pool, req.params.id);
+      concern = await pool.query("SELECT * FROM concerns WHERE id = $1", [req.params.id]);
+    }
+
+    const balance = await refreshOperatingBalance(pool, req.params.id);
+    res.json({
+      operatingWallet: wallet,
+      balance,
+      minWorkBalanceUsd: Number(concern.rows[0].min_work_balance_usd || 0.05),
+      creatorRewardsConfigured: Boolean(concern.rows[0].creator_rewards_configured)
+    });
+  } catch (error: any) {
+    res.status(502).json({ error: "funding_refresh_failed", detail: String(error?.message || error).slice(0, 1000) });
   }
 });
 
@@ -1070,6 +1106,7 @@ initDb()
   .then(() => {
     if (pool) {
       startBrowserPoller(pool);
+      startBalancePoller(pool);
       startFounderScheduler(pool, port);
     }
 
