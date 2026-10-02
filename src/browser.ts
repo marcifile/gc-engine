@@ -30,7 +30,7 @@ function client() {
 function taskQuery(task: string) {
   const objective = task.match(/Current objective:\s*([^\n]+)/i)?.[1];
   const action = task.match(/Specific next action:\s*([^\n]+)/i)?.[1];
-  return [objective, action].filter(Boolean).join(" ").slice(0, 420) || task.slice(0, 420);
+  return [objective, action].filter(Boolean).join(" ").slice(0, 180) || task.slice(0, 180);
 }
 
 async function debugUrl(bb: Browserbase, sessionId: string) {
