@@ -88,9 +88,24 @@ app.get("/concerns/:id", async (req, res) => {
 const createConcernSchema = z.object({
   id: z.string().min(1).regex(/^[a-z0-9-]+$/),
   name: z.string().min(1).max(64),
-  ticker: z.string().min(1).max(12),
-  category: z.string().min(1).max(120),
-  summary: z.string().min(1).max(280)
+  ticker: z.string().min(1).max(12).optional(),
+  category: z.string().min(1).max(120).optional(),
+  summary: z.string().min(1).max(280).optional(),
+  brief: z.string().min(1).max(1000).optional(),
+  extra: z.string().max(4000).optional(),
+  staffing: z.enum(["automatic", "manual"]).optional(),
+  externalActions: z.enum(["automatic", "ask"]).optional(),
+  initialBuySol: z.number().nonnegative().optional()
+}).transform((data) => {
+  const fallbackTicker = data.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase() || "GC";
+  const category = (data.category || data.brief || "new company").slice(0, 120);
+  const summary = (data.summary || data.extra || data.brief || "a company finding where to begin").slice(0, 280);
+  return {
+    ...data,
+    ticker: (data.ticker || fallbackTicker).replace(/^\$/, "").toUpperCase(),
+    category,
+    summary
+  };
 });
 
 app.post("/concerns", async (req, res) => {
