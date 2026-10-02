@@ -14,7 +14,7 @@ import { refreshBrowserRun, startBrowserPoller } from "./browserPoller.js";
 import { uploadTokenMetadata } from "./pinata.js";
 import { startFounderScheduler } from "./founderScheduler.js";
 import { buildGoogleAuthUrl, createCalendarEvent, exchangeGoogleCode, googleConfigured, saveGoogleIntegration, sendGmail, uploadFileToDrive } from "./google.js";
-import { queueOrExecuteExternalAction } from "./externalExecutor.js";
+import { executeExternalActionById, queueOrExecuteExternalAction } from "./externalExecutor.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -964,6 +964,19 @@ app.get("/concerns/:id/calendar", async (req, res) => {
     [req.params.id]
   );
   res.json({ items: result.rows });
+});
+
+app.post("/concerns/:id/outbox/:actionId/approve", async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  try {
+    const result = await executeExternalActionById(pool, req.params.id, req.params.actionId);
+    if (result.status === "failed") return res.status(502).json({ action: result });
+    res.json({ action: result });
+  } catch (error: any) {
+    const message = String(error?.message || error);
+    if (message === "external_action_not_found") return res.status(404).json({ error: message });
+    res.status(502).json({ error: "external_action_failed", detail: message.slice(0, 1000) });
+  }
 });
 
 app.get("/concerns/:id/outbox", async (req, res) => {
