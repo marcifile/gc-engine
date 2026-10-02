@@ -112,6 +112,30 @@ export async function initDb() {
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS auto_work BOOLEAN NOT NULL DEFAULT TRUE;
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS last_work_at TIMESTAMPTZ;
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS min_work_balance_usd NUMERIC NOT NULL DEFAULT 0.05;
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS external_actions_mode TEXT NOT NULL DEFAULT 'automatic';
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS staffing_mode TEXT NOT NULL DEFAULT 'automatic';
+
+    CREATE TABLE IF NOT EXISTS integrations (
+      id UUID PRIMARY KEY,
+      concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      access_token_enc TEXT,
+      refresh_token_enc TEXT,
+      expires_at TIMESTAMPTZ,
+      scopes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(concern_id, provider)
+    );
+
+    CREATE TABLE IF NOT EXISTS oauth_states (
+      state TEXT PRIMARY KEY,
+      concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
+      return_to TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '15 minutes'
+    );
 
     CREATE TABLE IF NOT EXISTS browser_runs (
       run_id TEXT PRIMARY KEY,
@@ -160,6 +184,8 @@ export function toConcern(row: any, notes: any[] = []) {
     autoWork: row.auto_work ?? true,
     lastWorkAt: row.last_work_at ?? null,
     minWorkBalanceUsd: Number(row.min_work_balance_usd ?? 0.05),
+    externalActionsMode: row.external_actions_mode ?? "automatic",
+    staffingMode: row.staffing_mode ?? "automatic",
     notes: notes.map((n) => ({
       id: n.id,
       text: n.text,
