@@ -360,6 +360,7 @@ app.post("/concerns/:id/run", async (req, res) => {
         `Current objective: ${decision.currentTask}.`,
         `Specific next action: ${decision.nextAction}.`,
         "Research this on the public web. Prefer primary sources and real user evidence.",
+        "Do not try to open GC internal files, local file paths, or private workspace documents in the browser. If the objective mentions one, use the public web to gather evidence that supports the objective instead.",
         "Return concise findings with source URLs and one practical suggested next step.",
         "Do not purchase anything, sign contracts, or submit sensitive personal information."
       ].join("\n");
