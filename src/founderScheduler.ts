@@ -7,12 +7,13 @@ export function startFounderScheduler(pool: Pool, port: number, intervalMs = 60_
     if (running) return;
     running = true;
     try {
+      const showcaseConcern = process.env.GC_SHOWCASE_CONCERN || null;
       const eligible = await pool.query(
         `SELECT c.id
          FROM concerns c
          WHERE c.auto_work = TRUE
-           AND c.mint_address IS NOT NULL
-           AND c.operating_balance_usd >= c.min_work_balance_usd
+           AND (c.mint_address IS NOT NULL OR c.id = $1)
+           AND (c.operating_balance_usd >= c.min_work_balance_usd OR c.id = $1)
            AND (c.last_work_at IS NULL OR c.last_work_at < NOW() - INTERVAL '10 minutes')
            AND NOT EXISTS (
              SELECT 1 FROM browser_runs br
@@ -20,7 +21,8 @@ export function startFounderScheduler(pool: Pool, port: number, intervalMs = 60_
                AND br.status IN ('PENDING', 'RUNNING', 'PAUSED')
            )
          ORDER BY c.last_work_at ASC NULLS FIRST
-         LIMIT 3`
+         LIMIT 3`,
+        [showcaseConcern]
       );
 
       for (const row of eligible.rows) {
