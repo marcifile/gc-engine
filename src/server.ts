@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import multer from "multer";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { initDb, pool, toConcern } from "./db.js";
@@ -10,8 +11,10 @@ import { getTokenMarket } from "./market.js";
 import { getAsset } from "./solana.js";
 import { preparePumpCreate } from "./pump.js";
 import { refreshBrowserRun, startBrowserPoller } from "./browserPoller.js";
+import { uploadTokenMetadata } from "./pinata.js";
 
 const app = express();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 app.use(cors());
 app.use(express.json());
 
@@ -62,7 +65,8 @@ app.get("/capabilities", (_req, res) => {
       googleDrive: false,
       gmail: false,
       googleCalendar: false,
-      tokenLaunch: true
+      tokenLaunch: true,
+      metadataStorage: Boolean(process.env.PINATA_JWT)
     }
   });
 });
@@ -408,6 +412,49 @@ app.get("/concerns/:id/browser-runs", async (req, res) => {
     [req.params.id]
   );
   res.json({ runs: result.rows });
+});
+
+app.post("/launch/metadata", upload.single("image"), async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "database_required" });
+  if (!process.env.PINATA_JWT) return res.status(503).json({ error: "metadata_storage_not_configured" });
+  if (!req.file) return res.status(400).json({ error: "image_required" });
+
+  const concernId = String(req.body?.concernId || "");
+  if (!concernId) return res.status(400).json({ error: "concern_id_required" });
+
+  const result = await pool.query("SELECT * FROM concerns WHERE id = $1", [concernId]);
+  if (!result.rowCount) return res.status(404).json({ error: "concern_not_found" });
+  const concern = result.rows[0];
+
+  try {
+    const uploaded = await uploadTokenMetadata({
+      image: {
+        buffer: req.file.buffer,
+        mimeType: req.file.mimetype,
+        filename: req.file.originalname || "token-image"
+      },
+      name: concern.name,
+      symbol: concern.ticker,
+      description: String(req.body?.description || concern.summary || "").slice(0, 1000),
+      twitter: req.body?.twitter ? String(req.body.twitter) : undefined,
+      telegram: req.body?.telegram ? String(req.body.telegram) : undefined,
+      website: req.body?.website ? String(req.body.website) : undefined
+    });
+
+    await pool.query(
+      `INSERT INTO events (id, concern_id, type, summary, metadata)
+       VALUES ($1, $2, 'metadata_uploaded', 'token metadata uploaded to IPFS', $3::jsonb)`,
+      [randomUUID(), concernId, JSON.stringify({ imageUri: uploaded.imageUri, metadataUri: uploaded.metadataUri })]
+    );
+
+    res.json({
+      imageUri: uploaded.imageUri,
+      metadataUri: uploaded.metadataUri
+    });
+  } catch (error: any) {
+    console.error(error);
+    res.status(502).json({ error: "metadata_upload_failed", detail: String(error?.message || error).slice(0, 1000) });
+  }
 });
 
 const prepareLaunchSchema = z.object({
