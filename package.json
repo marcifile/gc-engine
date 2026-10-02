@@ -14,7 +14,8 @@
     "express": "^5.1.0",
     "pg": "^8.13.3",
     "zod": "^3.24.2",
-    "@browserbasehq/sdk": "^2.7.0"
+    "@browserbasehq/sdk": "^2.7.0",
+    "multer": "^1.4.5-lts.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -22,6 +23,7 @@
     "@types/node": "^22.13.10",
     "@types/pg": "^8.11.11",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "@types/multer": "^1.4.12"
   }
 }
