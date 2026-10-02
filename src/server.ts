@@ -5,7 +5,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { initDb, pool, toConcern } from "./db.js";
 import { startBrowserWork, getBrowserWork } from "./browser.js";
-import { decideNextWork } from "./founder.js";
+import { decideNextWork, produceWorkArtifact } from "./founder.js";
 import { getTokenMarket } from "./market.js";
 import { getAsset } from "./solana.js";
 import { preparePumpCreate } from "./pump.js";
@@ -203,11 +203,25 @@ app.post("/concerns/:id/run", async (req, res) => {
   } else {
     const concernResult = await pool.query("SELECT * FROM concerns WHERE id = $1", [concernId]);
     if (concernResult.rowCount) {
-      const notesResult = await pool.query(
-        "SELECT * FROM notes WHERE concern_id = $1 ORDER BY created_at DESC LIMIT 25",
-        [concernId]
-      );
-      company = toConcern(concernResult.rows[0], notesResult.rows);
+      const [notesResult, memoriesResult, tasksResult] = await Promise.all([
+        pool.query(
+          "SELECT * FROM notes WHERE concern_id = $1 ORDER BY created_at DESC LIMIT 25",
+          [concernId]
+        ),
+        pool.query(
+          "SELECT kind, content, importance, created_at FROM memories WHERE concern_id = $1 ORDER BY importance DESC, created_at DESC LIMIT 30",
+          [concernId]
+        ),
+        pool.query(
+          "SELECT title, status, desk, result_summary, created_at, completed_at FROM tasks WHERE concern_id = $1 ORDER BY created_at DESC LIMIT 20",
+          [concernId]
+        )
+      ]);
+      company = {
+        ...toConcern(concernResult.rows[0], notesResult.rows),
+        memories: memoriesResult.rows,
+        recentTasks: tasksResult.rows
+      };
     }
   }
 
@@ -238,6 +252,7 @@ app.post("/concerns/:id/run", async (req, res) => {
     }
 
     let browserWork: any = null;
+    let artifact: any = null;
 
     if (decision.needsBrowser && process.env.BROWSERBASE_API_KEY) {
       const browserTask = [
@@ -271,9 +286,65 @@ app.post("/concerns/:id/run", async (req, res) => {
           ]
         );
       }
+    } else if (
+      pool &&
+      (decision.needsFiles || ["writing", "numbers", "build", "operations"].includes(decision.desk))
+    ) {
+      artifact = await produceWorkArtifact(company, decision);
+
+      await pool.query(
+        `INSERT INTO files (id, concern_id, path, mime_type, created_by, content)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (concern_id, path)
+         DO UPDATE SET mime_type = EXCLUDED.mime_type,
+                       created_by = EXCLUDED.created_by,
+                       content = EXCLUDED.content`,
+        [
+          randomUUID(),
+          concernId,
+          artifact.path,
+          artifact.mimeType,
+          `${decision.desk} desk`,
+          artifact.content
+        ]
+      );
+
+      await pool.query(
+        `INSERT INTO tasks (id, concern_id, title, status, desk, priority, result_summary, completed_at)
+         VALUES ($1, $2, $3, 'completed', $4, 5, $5, NOW())`,
+        [
+          randomUUID(),
+          concernId,
+          decision.currentTask.slice(0, 500),
+          decision.desk,
+          artifact.summary
+        ]
+      );
+
+      await pool.query(
+        `INSERT INTO memories (id, concern_id, kind, content, importance)
+         VALUES ($1, $2, 'work', $3, 6)`,
+        [randomUUID(), concernId, artifact.summary]
+      );
+
+      await pool.query(
+        `INSERT INTO events (id, concern_id, type, summary, metadata)
+         VALUES ($1, $2, 'file_created', $3, $4::jsonb)`,
+        [
+          randomUUID(),
+          concernId,
+          `${decision.desk} desk created ${artifact.path}`,
+          JSON.stringify({ path: artifact.path, nextStep: artifact.nextStep })
+        ]
+      );
+
+      await pool.query(
+        "UPDATE concerns SET current_task = $1, status = 'waiting', updated_at = NOW() WHERE id = $2",
+        [artifact.nextStep, concernId]
+      );
     }
 
-    res.json({ run: decision, browserWork });
+    res.json({ run: decision, browserWork, artifact });
   } catch (error: any) {
     console.error(error);
     res.status(502).json({ error: "founder_run_failed", detail: String(error?.message || error).slice(0, 1000) });
