@@ -105,6 +105,7 @@ export async function initDb() {
       completed_at TIMESTAMPTZ
     );
 
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS mint_address TEXT;
     ALTER TABLE files ADD COLUMN IF NOT EXISTS content TEXT;
     ALTER TABLE files ADD COLUMN IF NOT EXISTS source_url TEXT;
     ALTER TABLE tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
