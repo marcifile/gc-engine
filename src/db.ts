@@ -1,0 +1,135 @@
+import pg from "pg";
+
+const { Pool } = pg;
+
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : undefined
+});
+
+export async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS concerns (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      ticker TEXT NOT NULL,
+      category TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'waiting',
+      current_task TEXT NOT NULL DEFAULT 'decide where to begin',
+      creator_rewards_usd NUMERIC NOT NULL DEFAULT 0,
+      operating_balance_usd NUMERIC NOT NULL DEFAULT 0,
+      external_revenue_usd NUMERIC NOT NULL DEFAULT 0,
+      market_cap_usd NUMERIC NOT NULL DEFAULT 0,
+      day INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS notes (
+      id UUID PRIMARY KEY,
+      concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
+      text TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id UUID PRIMARY KEY,
+      concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS memories (
+      id UUID PRIMARY KEY,
+      concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL DEFAULT 'fact',
+      content TEXT NOT NULL,
+      importance INTEGER NOT NULL DEFAULT 5,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS tasks (
+      id UUID PRIMARY KEY,
+      concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      desk TEXT,
+      priority INTEGER NOT NULL DEFAULT 5,
+      result_summary TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS files (
+      id UUID PRIMARY KEY,
+      concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
+      path TEXT NOT NULL,
+      mime_type TEXT,
+      storage_url TEXT,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(concern_id, path)
+    );
+
+    CREATE TABLE IF NOT EXISTS ledger_entries (
+      id UUID PRIMARY KEY,
+      concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      amount_usd NUMERIC NOT NULL,
+      description TEXT NOT NULL,
+      tx_signature TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS external_actions (
+      id UUID PRIMARY KEY,
+      concern_id TEXT NOT NULL REFERENCES concerns(id) ON DELETE CASCADE,
+      action_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      result JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at TIMESTAMPTZ
+    );
+  `);
+
+  await pool.query(`
+    INSERT INTO concerns (id, name, ticker, category, summary, status, current_task)
+    VALUES (
+      'mesa',
+      'MESA',
+      'MESA',
+      'restaurant software',
+      'finding a better inventory workflow for small restaurants',
+      'working',
+      'research inventory problems for independent restaurants'
+    )
+    ON CONFLICT (id) DO NOTHING;
+  `);
+}
+
+export function toConcern(row: any, notes: any[] = []) {
+  return {
+    id: row.id,
+    name: row.name,
+    ticker: row.ticker,
+    category: row.category,
+    summary: row.summary,
+    status: row.status,
+    currentTask: row.current_task,
+    creatorRewardsUsd: Number(row.creator_rewards_usd),
+    operatingBalanceUsd: Number(row.operating_balance_usd),
+    externalRevenueUsd: Number(row.external_revenue_usd),
+    marketCapUsd: Number(row.market_cap_usd),
+    day: row.day,
+    notes: notes.map((n) => ({
+      id: n.id,
+      text: n.text,
+      createdAt: n.created_at
+    }))
+  };
+}
