@@ -127,7 +127,8 @@ const createConcernSchema = z.object({
   staffing: z.enum(["automatic", "manual"]).optional(),
   externalActions: z.enum(["automatic", "ask"]).optional(),
   initialBuySol: z.number().nonnegative().optional(),
-  founderModel: z.enum(["anthropic/claude-sonnet-5.5", "openai/gpt-6.1-sol", "google/gemini-3.5-flash"]).optional()
+  founderModel: z.enum(["anthropic/claude-sonnet-5.5", "openai/gpt-6.1-sol", "google/gemini-3.5-flash"]).optional(),
+  allowedTools: z.array(z.enum(["browser","google_drive","gmail","calendar","solana","market_data","ipfs"])).min(1).max(7).optional()
 }).transform((data) => {
   const fallbackTicker = data.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase() || "GC";
   const category = (data.category || data.brief || "new company").slice(0, 120);
@@ -164,8 +165,8 @@ app.post("/concerns", async (req, res) => {
 
   try {
     const result = await pool.query(
-      `INSERT INTO concerns (id, name, ticker, category, summary, staffing_mode, external_actions_mode, founder_model)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO concerns (id, name, ticker, category, summary, staffing_mode, external_actions_mode, founder_model, allowed_tools)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [
         parsed.data.id,
@@ -175,7 +176,8 @@ app.post("/concerns", async (req, res) => {
         parsed.data.summary,
         parsed.data.staffing || "automatic",
         parsed.data.externalActions || "automatic",
-        parsed.data.founderModel || "anthropic/claude-sonnet-5.5"
+        parsed.data.founderModel || "anthropic/claude-sonnet-5.5",
+        parsed.data.allowedTools || ["browser","google_drive","gmail","calendar","solana","market_data","ipfs"]
       ]
     );
 
@@ -349,7 +351,9 @@ app.post("/concerns/:id/run", async (req, res) => {
     let browserWork: any = null;
     let artifact: any = null;
 
-    if (decision.needsBrowser && process.env.BROWSERBASE_API_KEY) {
+    const allowedTools = Array.isArray(company.allowedTools) ? company.allowedTools : ["browser","google_drive","gmail","calendar","solana","market_data","ipfs"];
+
+    if (decision.needsBrowser && allowedTools.includes("browser") && process.env.BROWSERBASE_API_KEY) {
       const browserTask = [
         `You are the research desk for ${company.name}, a company in ${company.category}.`,
         `Current objective: ${decision.currentTask}.`,
