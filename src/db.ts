@@ -122,6 +122,7 @@ export async function initDb() {
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS allowed_tools TEXT[] NOT NULL DEFAULT ARRAY['browser','google_drive','gmail','calendar','solana','market_data','ipfs']::TEXT[];
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS business_mode TEXT NOT NULL DEFAULT 'defined';
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS launch_state TEXT NOT NULL DEFAULT 'launched';
+    UPDATE concerns SET launch_state = 'draft' WHERE mint_address IS NULL AND id <> 'mesa';
 
 
     CREATE TABLE IF NOT EXISTS concern_wallets (
