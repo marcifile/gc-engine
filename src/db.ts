@@ -120,6 +120,8 @@ export async function initDb() {
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS operating_wallet TEXT;
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS founder_model TEXT NOT NULL DEFAULT 'anthropic/claude-sonnet-5.5';
     ALTER TABLE concerns ADD COLUMN IF NOT EXISTS allowed_tools TEXT[] NOT NULL DEFAULT ARRAY['browser','google_drive','gmail','calendar','solana','market_data','ipfs']::TEXT[];
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS business_mode TEXT NOT NULL DEFAULT 'defined';
+    ALTER TABLE concerns ADD COLUMN IF NOT EXISTS launch_state TEXT NOT NULL DEFAULT 'launched';
 
 
     CREATE TABLE IF NOT EXISTS concern_wallets (
@@ -207,6 +209,8 @@ export function toConcern(row: any, notes: any[] = []) {
     operatingWallet: row.operating_wallet ?? null,
     founderModel: row.founder_model ?? "anthropic/claude-sonnet-4",
     allowedTools: Array.isArray(row.allowed_tools) ? row.allowed_tools : ["browser","google_drive","gmail","calendar","solana","market_data","ipfs"],
+    businessMode: row.business_mode ?? "defined",
+    launchState: row.launch_state ?? "launched",
     notes: notes.map((n) => ({
       id: n.id,
       text: n.text,
