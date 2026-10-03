@@ -12,6 +12,7 @@ export function startFounderScheduler(pool: Pool, port: number, intervalMs = 60_
         `SELECT c.id
          FROM concerns c
          WHERE c.auto_work = TRUE
+           AND c.launch_state = 'launched'
            AND (c.mint_address IS NOT NULL OR c.id = $1)
            AND (c.operating_balance_usd >= c.min_work_balance_usd OR c.id = $1)
            AND (
