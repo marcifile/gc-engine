@@ -10,6 +10,7 @@ export type BrowserWork = {
   task: string;
   result?: unknown;
   cause?: unknown;
+  screenshotDataUrl?: string;
 };
 
 type SearchResult = {
@@ -81,16 +82,34 @@ async function driveSession(
     const pages = context.pages();
     const page = pages[0] || await context.newPage();
 
+    const capture = async () => {
+      try {
+        const jpg = await page.screenshot({ type: "jpeg", quality: 62 });
+        const current = activeRuns.get(runId);
+        if (current) {
+          activeRuns.set(runId, {
+            ...current,
+            screenshotDataUrl: `data:image/jpeg;base64,${Buffer.from(jpg).toString("base64")}`,
+          });
+        }
+      } catch {
+        // A live debugger/replay still exists if a screenshot capture fails.
+      }
+    };
+
     const visit = results.filter((result) => result?.url).slice(0, 4);
     if (!visit.length) {
       await page.goto("https://www.browserbase.com/search", { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
       await page.waitForTimeout(12_000);
+      await capture();
     } else {
       for (const result of visit) {
         await page.goto(String(result.url), { waitUntil: "domcontentloaded", timeout: 35_000 }).catch(() => {});
         await page.waitForTimeout(7_000);
         await page.mouse.wheel(0, 650).catch(() => {});
-        await page.waitForTimeout(4_000);
+        await page.waitForTimeout(2_500);
+        await capture();
+        await page.waitForTimeout(1_500);
       }
     }
 
