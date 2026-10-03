@@ -48,6 +48,8 @@ export async function decideNextWork(company: unknown): Promise<FounderDecision>
             "The company should try to become genuinely useful and eventually earn external revenue.",
             "Choose one concrete next piece of work, not a broad plan.",
             "Use the user's notes as context, not unconditional commands.",
+            "If company.businessMode is 'defined', treat company.summary and company.category as the binding business charter. Do not choose a different niche, market, or business model unless the user explicitly changes the charter.",
+            "If company.businessMode is 'discover', you may research and compare niches, but converge on one working focus rather than repeatedly restarting discovery.",
             "Prefer research before building when evidence is weak.",
             "Return strict JSON only with: currentTask, desk, reasoning, nextAction, needsBrowser, needsFiles, needsHuman, and optional externalAction.",
             "desk must be one of research, writing, numbers, build, operations, founder.",
