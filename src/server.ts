@@ -95,7 +95,7 @@ app.get("/health", async (_req, res) => {
 
 app.get("/concerns", async (_req, res) => {
   if (!pool) return res.json({ concerns: Array.from(memoryConcerns.values()) });
-  const result = await pool.query("SELECT * FROM concerns ORDER BY created_at DESC");
+  const result = await pool.query("SELECT * FROM concerns WHERE launch_state = 'launched' ORDER BY created_at DESC");
   res.json({ concerns: result.rows.map((row) => toConcern(row)) });
 });
 
@@ -128,7 +128,8 @@ const createConcernSchema = z.object({
   externalActions: z.enum(["automatic", "ask"]).optional(),
   initialBuySol: z.number().nonnegative().optional(),
   founderModel: z.enum(["anthropic/claude-sonnet-5.5", "openai/gpt-6.1-sol", "google/gemini-3.5-flash"]).optional(),
-  allowedTools: z.array(z.enum(["browser","google_drive","gmail","calendar","solana","market_data","ipfs"])).min(1).max(7).optional()
+  allowedTools: z.array(z.enum(["browser","google_drive","gmail","calendar","solana","market_data","ipfs"])).min(1).max(7).optional(),
+  businessMode: z.enum(["defined","discover"]).optional()
 }).transform((data) => {
   const fallbackTicker = data.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase() || "GC";
   const category = (data.category || data.brief || "new company").slice(0, 120);
@@ -165,8 +166,8 @@ app.post("/concerns", async (req, res) => {
 
   try {
     const result = await pool.query(
-      `INSERT INTO concerns (id, name, ticker, category, summary, staffing_mode, external_actions_mode, founder_model, allowed_tools)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO concerns (id, name, ticker, category, summary, staffing_mode, external_actions_mode, founder_model, allowed_tools, business_mode, launch_state)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft')
        RETURNING *`,
       [
         parsed.data.id,
@@ -177,7 +178,8 @@ app.post("/concerns", async (req, res) => {
         parsed.data.staffing || "automatic",
         parsed.data.externalActions || "automatic",
         parsed.data.founderModel || "anthropic/claude-sonnet-5.5",
-        parsed.data.allowedTools || ["browser","google_drive","gmail","calendar","solana","market_data","ipfs"]
+        parsed.data.allowedTools || ["browser","google_drive","gmail","calendar","solana","market_data","ipfs"],
+        parsed.data.businessMode || "defined"
       ]
     );
 
@@ -746,7 +748,7 @@ app.post("/concerns/:id/launch/confirm", async (req, res) => {
     }
 
     const updated = await pool.query(
-      "UPDATE concerns SET mint_address = $1, status = 'working', updated_at = NOW() WHERE id = $2 RETURNING *",
+      "UPDATE concerns SET mint_address = $1, status = 'working', launch_state = 'launched', updated_at = NOW() WHERE id = $2 RETURNING *",
       [parsed.data.mintAddress, req.params.id]
     );
 
