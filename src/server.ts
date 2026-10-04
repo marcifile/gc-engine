@@ -748,7 +748,7 @@ app.post("/concerns/:id/launch/confirm", async (req, res) => {
     }
 
     const updated = await pool.query(
-      "UPDATE concerns SET mint_address = $1, status = 'working', launch_state = 'launched', updated_at = NOW() WHERE id = $2 RETURNING *",
+      "UPDATE concerns SET mint_address = $1, status = 'working', current_task = 'founder choosing first move', launch_state = 'launched', last_work_at = NULL, updated_at = NOW() WHERE id = $2 RETURNING *",
       [parsed.data.mintAddress, req.params.id]
     );
 
@@ -780,6 +780,20 @@ app.post("/concerns/:id/launch/confirm", async (req, res) => {
       signature: parsed.data.signature,
       confirmationStatus: chainStatus.confirmationStatus
     });
+
+    // Give every newly launched company one bootstrap founder cycle even before
+    // its operating wallet has creator-reward funding. Later automatic cycles
+    // still respect the company's configured operating-balance threshold.
+    setTimeout(() => {
+      void fetch(`http://127.0.0.1:${port}/concerns/${encodeURIComponent(req.params.id)}/run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-GC-Automation": "launch-bootstrap"
+        },
+        body: "{}"
+      }).catch((error) => console.error("launch bootstrap run failed", req.params.id, error));
+    }, 750);
   } catch (error: any) {
     console.error(error);
     res.status(502).json({ error: "launch_confirmation_failed", detail: String(error?.message || error).slice(0, 1000) });
