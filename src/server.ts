@@ -666,7 +666,7 @@ app.post("/launch/metadata", upload.single("image"), async (req, res) => {
 const prepareLaunchSchema = z.object({
   concernId: z.string().min(1),
   publicKey: z.string().min(32).max(64),
-  mint: z.string().min(32).max(64),
+  mint: z.string().min(32).max(64).optional(),
   metadataUri: z.string().url(),
   initialBuySol: z.number().min(0).max(100),
   slippage: z.number().min(0.1).max(100).optional(),
@@ -683,7 +683,7 @@ app.post("/launch/prepare", async (req, res) => {
   const concern = concernResult.rows[0];
 
   try {
-    const txBytes = await preparePumpCreate({
+    const preparedLaunch = await preparePumpCreate({
       publicKey: parsed.data.publicKey,
       mint: parsed.data.mint,
       name: concern.name,
@@ -700,13 +700,13 @@ app.post("/launch/prepare", async (req, res) => {
       [
         randomUUID(),
         parsed.data.concernId,
-        JSON.stringify({ mint: parsed.data.mint, publicKey: parsed.data.publicKey, initialBuySol: parsed.data.initialBuySol })
+        JSON.stringify({ mint: preparedLaunch.mint, publicKey: parsed.data.publicKey, initialBuySol: parsed.data.initialBuySol })
       ]
     );
 
     res.json({
-      transactionBase64: Buffer.from(txBytes).toString("base64"),
-      mint: parsed.data.mint,
+      transactionBase64: Buffer.from(preparedLaunch.bytes).toString("base64"),
+      mint: preparedLaunch.mint,
       concernId: parsed.data.concernId
     });
   } catch (error: any) {
