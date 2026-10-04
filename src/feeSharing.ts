@@ -1,4 +1,3 @@
-import { PUMP_SDK } from "@pump-fun/pump-sdk";
 import { NATIVE_MINT, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 
@@ -10,6 +9,15 @@ function connection() {
   );
 }
 
+async function pumpSdk() {
+  const mod: any = await import("@pump-fun/pump-sdk");
+  const sdk = mod?.PUMP_SDK ?? mod?.default?.PUMP_SDK ?? mod?.default;
+  if (!sdk?.createFeeSharingConfig || !sdk?.updateFeeSharesV2) {
+    throw new Error("Pump SDK fee-sharing helpers are unavailable");
+  }
+  return sdk;
+}
+
 export async function prepareFeeSharingTransaction(input: {
   creator: string;
   mint: string;
@@ -18,6 +26,7 @@ export async function prepareFeeSharingTransaction(input: {
   const creator = new PublicKey(input.creator);
   const mint = new PublicKey(input.mint);
   const operatingWallet = new PublicKey(input.operatingWallet);
+  const PUMP_SDK = await pumpSdk();
 
   const createIx = await PUMP_SDK.createFeeSharingConfig({
     creator,
