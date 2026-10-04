@@ -1,6 +1,6 @@
 export type PreparePumpCreateInput = {
   publicKey: string;
-  mint: string;
+  mint?: string;
   name: string;
   symbol: string;
   metadataUri: string;
