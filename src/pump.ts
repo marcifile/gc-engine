@@ -1,3 +1,5 @@
+import { Keypair, VersionedTransaction } from "@solana/web3.js";
+
 export type PreparePumpCreateInput = {
   publicKey: string;
   mint?: string;
@@ -9,7 +11,19 @@ export type PreparePumpCreateInput = {
   priorityFee?: number;
 };
 
-export async function preparePumpCreate(input: PreparePumpCreateInput): Promise<Uint8Array> {
+export type PreparedPumpCreate = {
+  bytes: Uint8Array;
+  mint: string;
+};
+
+export async function preparePumpCreate(input: PreparePumpCreateInput): Promise<PreparedPumpCreate> {
+  if (input.mint) {
+    throw new Error("client-provided mint is no longer supported");
+  }
+
+  const mintKeypair = Keypair.generate();
+  const mint = mintKeypair.publicKey.toBase58();
+
   const response = await fetch("https://pumpportal.fun/api/trade-local", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -21,7 +35,7 @@ export async function preparePumpCreate(input: PreparePumpCreateInput): Promise<
         symbol: input.symbol,
         uri: input.metadataUri
       },
-      mint: input.mint,
+      mint,
       denominatedInSol: "true",
       amount: input.initialBuySol,
       slippage: input.slippage ?? 10,
@@ -35,5 +49,12 @@ export async function preparePumpCreate(input: PreparePumpCreateInput): Promise<
     throw new Error(`PumpPortal create failed: ${response.status} ${detail.slice(0, 700)}`);
   }
 
-  return new Uint8Array(await response.arrayBuffer());
+  const raw = new Uint8Array(await response.arrayBuffer());
+  const transaction = VersionedTransaction.deserialize(raw);
+  transaction.sign([mintKeypair]);
+
+  return {
+    bytes: transaction.serialize(),
+    mint
+  };
 }
